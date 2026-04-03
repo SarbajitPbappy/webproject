@@ -46,6 +46,17 @@ class Database
             $this->pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
             error_log('Database connection failed: ' . $e->getMessage());
+            // Friendly dev message (avoid leaking secrets).
+            if (defined('APP_ENV') && APP_ENV === 'development') {
+                $missing = [];
+                if (empty(DB_HOST)) $missing[] = 'DB_HOST';
+                if (empty(DB_PORT)) $missing[] = 'DB_PORT';
+                if (empty(DB_NAME)) $missing[] = 'DB_NAME';
+                if (empty(DB_USER)) $missing[] = 'DB_USER';
+                if (empty(DB_PASS)) $missing[] = 'DB_PASS';
+                $missingStr = empty($missing) ? '' : (' Missing: ' . implode(', ', $missing) . '.');
+                die('Database connection failed.' . $missingStr . ' Check hostelease/.env values.');
+            }
             die('A database error occurred. Please try again later.');
         }
     }

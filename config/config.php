@@ -11,6 +11,9 @@ if (!defined('APP_ROOT')) {
     define('APP_ROOT', dirname(__DIR__));
 }
 
+// Environment (development/production)
+define('APP_ENV', getenv('APP_ENV') ?: 'development');
+
 /**
  * Load key/value pairs from a local .env file (no external dependency).
  * Lines format: KEY=value
@@ -90,7 +93,8 @@ define('DB_USER', getenv('DB_USER') ?: 'avnadmin');
 // In Render, set DB_PASS in Environment variables.
 define('DB_PASS', getenv('DB_PASS') ?: '');
 define('DB_CHARSET', 'utf8mb4');
-define('DB_SSL', filter_var(getenv('DB_SSL') ?: 'true', FILTER_VALIDATE_BOOLEAN));
+// Default to false for local dev; set true in Render if your DB requires SSL.
+define('DB_SSL', filter_var(getenv('DB_SSL') ?: 'false', FILTER_VALIDATE_BOOLEAN));
 
 // ─── File Upload Settings ───────────────────────────────────────────
 define('UPLOAD_PATH', APP_ROOT . '/public/uploads/');
