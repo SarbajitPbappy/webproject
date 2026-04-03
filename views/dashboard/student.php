@@ -57,7 +57,7 @@
                             <strong><?php echo e($p['fee_name']); ?></strong>
                             <br><small class="text-muted"><?php echo e($p['receipt_no']); ?> · <?php echo date('M d', strtotime($p['payment_date'])); ?></small>
                         </div>
-                        <span class="fw-semibold text-success">₹<?php echo number_format($p['amount_paid'], 0); ?></span>
+                        <span class="fw-semibold text-success">৳<?php echo number_format($p['amount_paid'], 0); ?></span>
                     </div>
                     <?php endforeach; ?>
                     <?php endif; ?>

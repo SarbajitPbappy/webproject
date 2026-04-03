@@ -59,7 +59,7 @@
         <div class="card card-glass">
             <div class="card-body text-center">
                 <i class="bi bi-currency-dollar text-success fs-1"></i>
-                <h3 class="mt-2 mb-0">₹<?php echo number_format($kpi['monthly_revenue'], 0); ?></h3>
+                <h3 class="mt-2 mb-0">৳<?php echo number_format($kpi['monthly_revenue'], 0); ?></h3>
                 <p class="text-muted">Revenue This Month</p>
             </div>
         </div>
@@ -68,7 +68,7 @@
         <div class="card card-glass">
             <div class="card-body text-center">
                 <i class="bi bi-graph-up text-primary fs-1"></i>
-                <h3 class="mt-2 mb-0">₹<?php echo number_format($kpi['total_balance'], 0); ?></h3>
+                <h3 class="mt-2 mb-0">৳<?php echo number_format($kpi['total_balance'], 0); ?></h3>
                 <p class="text-muted">Total Balance (Ledger)</p>
             </div>
         </div>

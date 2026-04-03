@@ -73,7 +73,7 @@ $role = currentUser()['role'] ?? '';
                             <br><small class="text-muted"><?php echo e($p['student_id_no']); ?></small>
                         </td>
                         <td><?php echo e($p['fee_name']); ?></td>
-                        <td class="fw-semibold">₹<?php echo number_format($p['amount_paid'], 2); ?></td>
+                        <td class="fw-semibold">৳<?php echo number_format($p['amount_paid'], 2); ?></td>
                         <td><span class="badge bg-secondary-subtle text-secondary"><?php echo ucfirst(e($p['payment_method'])); ?></span></td>
                         <td><?php echo date('M d, Y', strtotime($p['payment_date'])); ?></td>
                         <td><?php echo e($p['month_year']); ?></td>

@@ -205,7 +205,7 @@ class PaymentController
                 'notes' => 'Online portal payment',
             ]);
 
-            AuditLog::log($userId, 'PAYMENT', 'payments', $paymentId, "Made online payment of ₹{$amount}");
+            AuditLog::log($userId, 'PAYMENT', 'payments', $paymentId, "Made online payment of ৳{$amount}");
             header('Location: ' . BASE_URL . '?url=payments/index&success=1');
             exit;
 
@@ -313,7 +313,7 @@ class PaymentController
                 'CREATE',
                 'payments',
                 $paymentId,
-                'Recorded payment of ₹' . $data['amount_paid']
+                'Recorded payment of ৳' . $data['amount_paid']
             );
 
             setFlash('success', 'Payment recorded successfully!');

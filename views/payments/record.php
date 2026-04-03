@@ -33,14 +33,14 @@
                         <option value="">Select Fee...</option>
                         <?php foreach ($feeStructures as $f): ?>
                         <option value="<?php echo $f['id']; ?>" data-amount="<?php echo $f['amount']; ?>">
-                            <?php echo e($f['name']); ?> — ₹<?php echo number_format($f['amount'], 2); ?> (<?php echo ucfirst(e($f['frequency'])); ?>)
+                            <?php echo e($f['name']); ?> — ৳<?php echo number_format($f['amount'], 2); ?> (<?php echo ucfirst(e($f['frequency'])); ?>)
                         </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
                 <div class="mb-3">
-                    <label for="amount_paid" class="form-label">Amount Paid (₹) <span class="text-danger">*</span></label>
+                    <label for="amount_paid" class="form-label">Amount Paid (৳) <span class="text-danger">*</span></label>
                     <input type="number" class="form-control" id="amount_paid" name="amount_paid" step="0.01" min="0" value="<?php echo e($data['amount_paid'] ?? ''); ?>" required>
                 </div>
                 <div class="col-md-4">

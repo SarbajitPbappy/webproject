@@ -29,14 +29,14 @@
                             <option value="">-- Choose Fee Type --</option>
                             <?php foreach ($feeStructures as $fee): ?>
                                 <option value="<?php echo $fee['id']; ?>" data-amount="<?php echo $fee['amount']; ?>">
-                                    <?php echo e($fee['name']); ?> (₹<?php echo number_format($fee['amount'], 2); ?>)
+                                    <?php echo e($fee['name']); ?> (৳<?php echo number_format($fee['amount'], 2); ?>)
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
 
                     <div class="mb-4">
-                        <label class="form-label">Amount (₹)</label>
+                        <label class="form-label">Amount (৳)</label>
                         <input type="number" step="0.01" class="form-control" name="amount" id="amount" value="" required readonly>
                     </div>
 

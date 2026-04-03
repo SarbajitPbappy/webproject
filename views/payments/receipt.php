@@ -49,13 +49,13 @@
                 <tr>
                     <td><?php echo e($payment['fee_name']); ?></td>
                     <td><?php echo ucfirst(e($payment['frequency'])); ?></td>
-                    <td class="text-end fw-semibold">₹<?php echo number_format($payment['amount_paid'], 2); ?></td>
+                    <td class="text-end fw-semibold">৳<?php echo number_format($payment['amount_paid'], 2); ?></td>
                 </tr>
             </tbody>
             <tfoot>
                 <tr class="table-primary">
                     <td colspan="2" class="text-end fw-bold">Total Paid:</td>
-                    <td class="text-end fw-bold fs-5">₹<?php echo number_format($payment['amount_paid'], 2); ?></td>
+                    <td class="text-end fw-bold fs-5">৳<?php echo number_format($payment['amount_paid'], 2); ?></td>
                 </tr>
             </tfoot>
         </table>

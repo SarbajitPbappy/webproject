@@ -448,7 +448,7 @@
                         <span class="room-type-badge badge <?php echo $badge; ?>"><?php echo ucfirst($type); ?></span>
                         <div class="room-title"><?php echo $name; ?></div>
                         <small class="text-muted"><?php echo $tagline; ?></small>
-                        <div class="room-price mt-2">₹<?php echo $price; ?> <small class="text-muted fs-6 fw-normal">/month</small></div>
+                        <div class="room-price mt-2">৳<?php echo $price; ?> <small class="text-muted fs-6 fw-normal">/month</small></div>
                         <div class="room-amenities">
                             <?php foreach (explode(',', $amenities) as $a): ?>
                             <span class="room-amenity"><?php echo trim($a); ?></span>
