@@ -20,7 +20,8 @@ $baseUrlEnv = getenv('BASE_URL') ?: '';
 if (!empty($baseUrlEnv)) {
     $computedBaseUrl = rtrim($baseUrlEnv, '/') . '/';
 } else {
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    $forwardedProto = strtolower(trim($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
     $scheme = $https ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost:8000';
     $computedBaseUrl = $scheme . '://' . $host . '/';
