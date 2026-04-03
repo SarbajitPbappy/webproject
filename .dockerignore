@@ -1,0 +1,10 @@
+**/.DS_Store
+**/.git
+**/.github
+**/.vscode
+**/node_modules
+**/vendor
+**/tmp
+**/logs
+**/*.log
+

@@ -58,13 +58,13 @@ if ($role === 'super_admin') {
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
                 <li>
-                    <a class="dropdown-item" href="?url=profile/index">
+                    <a class="dropdown-item" href="<?php echo BASE_URL; ?>?url=profile/index">
                         <i class="bi bi-person me-2"></i>My Profile
                     </a>
                 </li>
                 <li><hr class="dropdown-divider"></li>
                 <li>
-                    <a class="dropdown-item text-danger" href="?url=auth/logout">
+                    <a class="dropdown-item text-danger" href="<?php echo BASE_URL; ?>?url=auth/logout">
                         <i class="bi bi-box-arrow-right me-2"></i>Logout
                     </a>
                 </li>
