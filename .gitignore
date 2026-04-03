@@ -1,0 +1,28 @@
+# Compiled files
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Upload directories
+public/uploads/students/*
+public/uploads/documents/*
+!public/uploads/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Environment files
+.env

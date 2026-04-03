@@ -1,0 +1,45 @@
+# ─── HostelEase .htaccess ────────────────────────────────────────────
+# Apache rewrite rules, directory protection, and security headers.
+
+Options -Indexes
+Options -MultiViews
+
+# ─── Enable Rewrite Engine ───────────────────────────────────────────
+RewriteEngine On
+
+# ─── Block access to sensitive directories ───────────────────────────
+RewriteRule ^(app|config|database|logs|libs)/ - [F,L]
+
+# ─── Block access to hidden files (e.g. .env, .git) ─────────────────
+RewriteRule (^\.|/\.) - [F,L]
+
+# ─── Route all requests through index.php ────────────────────────────
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
+
+# ─── Security Headers ───────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>
+
+# ─── Prevent PHP files from being accessed in upload dirs ────────────
+<Directory "public/uploads">
+    <FilesMatch "\.php$">
+        Require all denied
+    </FilesMatch>
+</Directory>
+
+# ─── Cache static assets ────────────────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/javascript "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/jpeg "access plus 1 month"
+    ExpiresByType image/webp "access plus 1 month"
+</IfModule>
