@@ -19,13 +19,20 @@ class Database
      */
     private function __construct()
     {
-        $dsn = sprintf(
-            'mysql:host=%s;port=%s;dbname=%s;charset=%s',
-            DB_HOST,
-            DB_PORT,
-            DB_NAME,
-            DB_CHARSET
-        );
+        $dsnParts = [
+            'mysql:host=' . DB_HOST,
+            'port=' . DB_PORT,
+            'dbname=' . DB_NAME,
+            'charset=' . DB_CHARSET,
+        ];
+
+        // Aiven MySQL commonly requires SSL ("ssl-mode=REQUIRED").
+        // PDO supports this via the `sslmode` DSN parameter.
+        if (defined('DB_SSL') && DB_SSL) {
+            $dsnParts[] = 'sslmode=require';
+        }
+
+        $dsn = implode(';', $dsnParts);
 
         $options = [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
