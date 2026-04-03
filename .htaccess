@@ -28,11 +28,10 @@ RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
 </IfModule>
 
 # ─── Prevent PHP files from being accessed in upload dirs ────────────
-<Directory "public/uploads">
-    <FilesMatch "\.php$">
-        Require all denied
-    </FilesMatch>
-</Directory>
+# NOTE: `<Directory>` blocks are not allowed inside `.htaccess`.
+# We block requests to `public/uploads/*.php` using rewrite rules instead.
+RewriteCond %{REQUEST_URI} ^/public/uploads/.*\.php$ [NC]
+RewriteRule ^ - [F,L]
 
 # ─── Cache static assets ────────────────────────────────────────────
 <IfModule mod_expires.c>
