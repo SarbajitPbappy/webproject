@@ -73,7 +73,13 @@ define('APP_VERSION', '1.0.0');
 // BASE_URL is used for generating links. In production (Render), the host is dynamic,
 // so we compute it from environment/request when not explicitly provided.
 $baseUrlEnv = getenv('BASE_URL') ?: '';
-if (!empty($baseUrlEnv)) {
+// Safety: don't allow localhost BASE_URL in production.
+$isLocalhostBase =
+    str_contains($baseUrlEnv, 'localhost') ||
+    str_contains($baseUrlEnv, '127.0.0.1') ||
+    str_contains($baseUrlEnv, '0.0.0.0');
+
+if (!empty($baseUrlEnv) && !(APP_ENV !== 'development' && $isLocalhostBase)) {
     $computedBaseUrl = rtrim($baseUrlEnv, '/') . '/';
 } else {
     $forwardedProto = strtolower(trim($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
