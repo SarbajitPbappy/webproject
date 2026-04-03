@@ -1,400 +1,298 @@
 # HostelEase — Web-Based Hostel Management System
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![PHP](https://img.shields.io/badge/PHP-8.x-purple)
+![PHP](https://img.shields.io/badge/PHP-8.2+-purple)
 ![MySQL](https://img.shields.io/badge/MySQL-8.x-orange)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-blueviolet)
-![License](https://img.shields.io/badge/license-MIT-green)
 
-**HostelEase** is a production-level, web-based hostel management system built with PHP 8.x (OOP MVC), MySQL 8.x, Bootstrap 5, and Vanilla JavaScript. It provides comprehensive management of students, rooms, allocations, payments, complaints, and notices for hostel administrators.
+**HostelEase** is a production-oriented hostel management application built with PHP (custom MVC), MySQL, Bootstrap 5, and vanilla JavaScript. It supports student and room lifecycle management, fee payments, complaints with SLA tracking, notices, audit logging, payroll workflows, and a simple finance ledger.
 
----
-
-## 📋 Table of Contents
-
-- [Features](#-features)
-- [Tech Stack](#-tech-stack)
-- [Prerequisites](#-prerequisites)
-- [Installation & Setup](#-installation--setup)
-- [MySQL Workbench Setup](#-mysql-workbench-setup)
-- [Default Credentials](#-default-credentials)
-- [Project Structure](#-project-structure)
-- [User Roles & Permissions](#-user-roles--permissions)
-- [Modules Overview](#-modules-overview)
-- [Security Features](#-security-features)
-- [Routes Reference](#-routes-reference)
-- [Screenshots](#-screenshots)
-- [Contributing](#-contributing)
-- [License](#-license)
+For **architecture, security details, environment variables, and troubleshooting**, see [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ---
 
-## ✨ Features
+## Table of contents
 
-### Core Functionality
-- **Multi-Role Authentication** — Super Admin, Admin, Student, Staff with role-based dashboards
-- **Student Management** — Full CRUD with photo upload, search, and status lifecycle
-- **Room Management** — Room inventory, occupancy tracking, capacity management
-- **Room Allocation** — Assign/transfer/vacate with waitlist queue
-- **Payment Tracking** — Manual cash recording with auto-generated receipt numbers
-- **Complaint System** — Ticket management with SLA tracking (24h high / 72h medium)
-- **Notice Board** — Admin announcements with pinned notices
-- **Audit Logging** — Complete activity trail (who, what, when, IP)
-
-### Security
-- PDO prepared statements (zero raw SQL concatenation)
-- CSRF token protection on every form
-- XSS prevention via `htmlspecialchars()` on all output
-- bcrypt password hashing
-- Login throttling (5 attempts → 15 min lockout)
-- Secure session management with httponly cookies
-- File upload validation with `finfo_file()` MIME checking
-- `.htaccess` directory blocking and security headers
-
-### UI/UX
-- Modern, responsive design with Bootstrap 5
-- Professional sidebar navigation
-- KPI dashboard cards with real-time metrics
-- DataTables for searchable/sortable tables
-- Printable payment receipts
-- Flash messaging system
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration (`.env`)](#configuration-env)
+- [Database setup](#database-setup)
+- [Run locally](#run-locally)
+- [Docker](#docker)
+- [Deploy on Render](#deploy-on-render)
+- [Default credentials](#default-credentials)
+- [User roles](#user-roles)
+- [Project structure](#project-structure)
+- [Security highlights](#security-highlights)
+- [Routes (quick reference)](#routes-quick-reference)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## 🛠 Tech Stack
+## Features
 
-| Layer           | Technology                         |
-|:----------------|:-----------------------------------|
-| Backend         | PHP 8.x (OOP, MVC pattern)         |
-| Database        | MySQL 8.x                          |
-| DB Management   | MySQL Workbench                    |
-| Frontend        | HTML5, CSS3, Bootstrap 5, Vanilla JS |
-| Local Server    | XAMPP (Apache + MySQL)             |
-| Font            | Google Fonts (Inter)               |
-| Icons           | Bootstrap Icons                    |
-| Tables          | DataTables.js                      |
-| Version Control | Git + GitHub                       |
+### Operations
 
----
+- **Multi-role access** — `super_admin`, `admin`, `student`, `staff` with role-aware menus and redirects.
+- **Landing page** — Public marketing/home; logged-in users are sent to the correct dashboard.
+- **Students** — CRUD, photos and documents, search; default password when none is set at creation.
+- **Rooms & allocations** — Inventory, capacity, allocate / transfer / vacate, waitlist.
+- **Automation** — When a student vacates and a room has capacity, the next waitlisted student can be allocated automatically (see [DOCUMENTATION.md](DOCUMENTATION.md)).
+- **Payments** — Fee structures, manual recording (admin), online portal (students and staff/admin **with a linked student profile**), receipts.
+- **Payroll** — Staff apply for monthly slips; admin review/approval; **super admin** distributes salary and records expenses in the ledger.
+- **Super Admin notifications** — Pending payroll items are surfaced in the navbar/sidebar (badge/dot).
+- **Complaints** — Ticketing, assignment, SLA (high 24h / medium 72h).
+- **Notices** — Pinned announcements.
+- **Audit log** — Super Admin–visible activity trail.
+- **Profiles** — All users can update **name, phone, photo** (and related fields); **student ID / login identifiers** are not user-editable in self-service flows.
 
-## 📦 Prerequisites
+### Security & quality
 
-Before you begin, ensure you have the following installed:
-
-1. **XAMPP** (v8.2+) — [Download](https://www.apachefriends.org/download.html)
-   - Includes Apache, MySQL, and PHP
-2. **MySQL Workbench** (v8.0+) — [Download](https://dev.mysql.com/downloads/workbench/)
-   - For database schema management and visualization
-3. **Git** — [Download](https://git-scm.com/downloads)
-4. **A modern web browser** (Chrome, Firefox, Edge)
+- PDO prepared statements, CSRF on POST forms, XSS-safe output helpers, bcrypt passwords, login throttling, session hardening, validated uploads, `.htaccess` routing and upload protections.
 
 ---
 
-## 🚀 Installation & Setup
+## Tech stack
 
-### Step 1: Clone the Repository
+| Layer | Technology |
+|--------|------------|
+| Backend | PHP 8.2+ (custom MVC, no framework) |
+| Database | MySQL 8.x (local or managed, e.g. Aiven) |
+| Front end | HTML5, CSS3, Bootstrap 5, DataTables, vanilla JS |
+| Server | Apache + `mod_rewrite` (XAMPP, Docker, or PaaS) |
+
+---
+
+## Prerequisites
+
+- **PHP 8.2+** with extensions: `pdo_mysql`, `mbstring`, `fileinfo` (for uploads).
+- **MySQL** (local or remote).
+- **Composer** — not required; no Composer dependencies in core app.
+- **Git** (optional).
+- **Apache** with `AllowOverride All` **or** PHP built-in server for development (see below).
+
+---
+
+## Installation
+
+### 1. Get the code
 
 ```bash
-cd /path/to/xampp/htdocs
-git clone https://github.com/your-username/hostelease.git
-cd hostelease
+git clone https://github.com/SarbajitPbappy/webproject.git
+cd webproject/hostelease
 ```
 
-Or download and extract the ZIP file to `htdocs/hostelease/`.
+If your clone layout differs, `cd` into the folder that contains `index.php`, `config/`, and `app/`.
 
-### Step 2: Start XAMPP Services
-
-1. Open **XAMPP Control Panel**
-2. Start **Apache** (Web Server)
-3. Start **MySQL** (Database Server)
-4. Verify Apache is running on port `80` and MySQL on port `3306`
-
-### Step 3: Database Configuration (Aiven Cloud)
-
-This project is pre-configured to connect to a live **Aiven MySQL** database. The configuration inside `config/config.php` has been updated with the following credentials:
-- **Host:** `hostelease-hostelease.a.aivencloud.com`
-- **Port:** `19887`
-- **Database:** `defaultdb`
-- **Username:** `avnadmin`
-
-*Note: The project uses `PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false` out-of-the-box to facilitate quick connections without a local CA file. For production, please download the `ca.pem` from Aiven and specify it in your PDO connection.*
-
-To set up the schema and seed the initial admin account, run:
-```bash
-php database/seeds/admin_seed.php
-```
-*(Note: If the schema hasn't been imported yet, you can run `mysql -u avnadmin -p -h hostelease-hostelease.a.aivencloud.com -P 19887 defaultdb < database/hostelease.sql` first).*
-
-### Step 4: Configure the Application
-
-Edit `config/config.php` if your environment differs from defaults.
-
-```php
-// URL — update if your project is in a different folder
-define('BASE_URL', 'http://localhost/hostelease/');
-```
-
-### Step 5: Create Required Directories
-
-The following directories should already exist. If not, create them:
+### 2. Copy environment template
 
 ```bash
-mkdir -p public/uploads/students
-mkdir -p public/uploads/documents
-mkdir -p logs
+cp .env.example .env
 ```
 
-Ensure the web server has write permissions:
+Edit `.env` with your database credentials and optional `BASE_URL`. Never commit `.env`.
+
+### 3. Writable paths
+
 ```bash
-chmod 755 public/uploads/students
-chmod 755 public/uploads/documents
-chmod 755 logs
+mkdir -p public/uploads/students public/uploads/documents logs
+chmod -R u+rwX public/uploads logs
 ```
-
-### Step 6: Access the Application
-
-Open your browser and navigate to:
-```
-http://localhost/hostelease/
-```
-
-You should see the login page. Log in with the default credentials.
 
 ---
 
-## 🔑 Default Credentials
+## Configuration (`.env`)
 
-| Role        | Email                    | Password   |
-|:------------|:-------------------------|:-----------|
-| Super Admin | `admin@hostelease.com`   | `Admin@123`|
+| Variable | Purpose |
+|----------|---------|
+| `APP_ENV` | `development` or `production`. Affects error detail and `BASE_URL` behavior. |
+| `BASE_URL` | Optional. Full base URL with trailing slash (e.g. `http://localhost:8000/`). In production, avoid leaving this as `localhost`; if unset, the app derives the URL from the request (HTTPS-aware behind proxies). |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` | MySQL connection. |
+| `DB_SSL` | `true` or `false`. Use `true` for providers that require TLS (e.g. Aiven). |
+| `SUPER_ADMIN_PASS_HASH` | Optional bcrypt hash for a legacy/virtual super-admin login path; prefer seeding a real `super_admin` user in the database. |
 
-> ⚠️ **Important:** Change the default credentials immediately after first login for security.
-
-Students created through the system receive the default password: `Student@123`
+See [DOCUMENTATION.md](DOCUMENTATION.md) for full behavior of `BASE_URL` and production checks.
 
 ---
 
-## 📂 Project Structure
+## Database setup
+
+1. **Import schema** (from the `hostelease` directory):
+
+   ```bash
+   mysql -h YOUR_HOST -P YOUR_PORT -u YOUR_USER -p YOUR_DATABASE < database/hostelease.sql
+   ```
+
+2. **Seed the Super Admin** (once):
+
+   ```bash
+   php database/seeds/admin_seed.php
+   ```
+
+3. **Payroll & finance tables** (if you use payroll/finance features):
+
+   ```bash
+   php database/migrations/migrate_payroll.php
+   ```
+
+If `transactions` already exists from `hostelease.sql`, the migration uses `CREATE TABLE IF NOT EXISTS` and aligns with the ledger schema.
+
+---
+
+## Run locally
+
+The app expects front-controller routing (`?url=...` or pretty URLs via rewrite). **Apache with `mod_rewrite`** is the supported setup for clean paths.
+
+### Option A — XAMPP / Apache (recommended)
+
+Point the virtual host document root to the `hostelease` folder, enable `mod_rewrite`, set `AllowOverride All`, and set `BASE_URL` to match (e.g. `http://localhost/hostelease/`).
+
+### Option B — PHP built-in server (limited)
+
+The PHP built-in server **does not** read `.htaccess`, so paths like `/auth/login` are not rewritten automatically. From the `hostelease` directory you can still run:
+
+```bash
+php -S localhost:8000 -t .
+```
+
+Then open URLs **with the query string**, for example:
+
+`http://localhost:8000/index.php?url=auth/login`
+
+Set in `.env`:
+
+```env
+APP_ENV=development
+BASE_URL=http://localhost:8000/
+```
+
+---
+
+## Docker
+
+A `Dockerfile` is included (PHP 8.2 + Apache). It enables `mod_rewrite` and `AllowOverride All` so the front controller and `.htaccess` rules work.
+
+Build and run from the `hostelease` directory:
+
+```bash
+docker build -t hostelease .
+docker run -p 8080:80 -e DB_HOST=... -e DB_PASS=... -e APP_ENV=production hostelease
+```
+
+Pass database and app settings via `-e` or an env file supported by your platform.
+
+---
+
+## Deploy on Render
+
+1. **Repository** — Connect the GitHub repo; set the **Root Directory** to `hostelease` if the app lives in that subfolder.
+2. **Environment** — Set at least: `APP_ENV=production`, `DB_*`, `DB_SSL=true` if your provider requires SSL, and `DB_PASS`.
+3. **`BASE_URL`** — Either **omit** it (recommended) so the app builds URLs from `https://your-service.onrender.com/`, or set explicitly to your public URL with a trailing slash. Do **not** set production to a `localhost` URL.
+4. **Build / start** — Use the Docker runtime with the provided `Dockerfile`, or a PHP/Apache service with document root = `hostelease` and rewrite rules enabled.
+5. **Database** — Import `hostelease.sql`, run `admin_seed.php`, then `migrate_payroll.php` if needed.
+
+---
+
+## Default credentials
+
+After `admin_seed.php`:
+
+| Role | Email | Password |
+|------|--------|----------|
+| Super Admin | `admin@hostelease.com` | `Admin@123` |
+
+Change this password immediately after first login.
+
+Students created by admins without a password use **`Student@123`** by default (change after first login).
+
+---
+
+## User roles
+
+| Role | Typical use |
+|------|-------------|
+| **Super Admin** | Full visibility, audit log, user management, **payroll distribution** (salary payment), finance overview. **Does not** use the student fee portal or record manual student payments (those are **admin**). |
+| **Admin** | Students, rooms, allocations, complaints, notices, **record manual student payments**, review payroll slips (approval). |
+| **Staff** | Complaints, dashboard; **payroll** self-service; **hostel fees** only if they have a **student** profile (e.g. “hostel occupant”) linked to their user. |
+| **Student** | Own profile, room/payment/complaint views, online fee portal. |
+
+**Hostel occupant** — When a Super Admin creates an admin/staff user, they can register a linked student profile so that user can be allocated a room and pay fees like other students.
+
+---
+
+## Project structure
 
 ```
 hostelease/
-├── index.php                    # Entry point & router
-├── .htaccess                    # URL rewriting & security
-├── .gitignore                   # Git ignore rules
-│
+├── index.php                 # Front controller / router
+├── .htaccess                 # Rewrites, security headers, upload PHP block
+├── Dockerfile                # PHP-Apache image for Render/Docker
+├── .env.example              # Template for local/production secrets
 ├── config/
-│   ├── config.php               # App constants & DB credentials
-│   ├── database.php             # PDO singleton connection
-│   └── session.php              # Session management & CSRF init
-│
+│   ├── config.php            # Constants, env loading, BASE_URL
+│   ├── database.php          # PDO (SSL-capable DSN)
+│   └── session.php
 ├── app/
-│   ├── controllers/
-│   │   ├── AuthController.php       # Login, logout, password reset
-│   │   ├── StudentController.php    # Student CRUD
-│   │   ├── RoomController.php       # Room CRUD
-│   │   ├── AllocationController.php # Allocate, transfer, vacate
-│   │   ├── PaymentController.php    # Payment recording
-│   │   ├── ComplaintController.php  # Complaint management
-│   │   ├── NoticeController.php     # Notice CRUD
-│   │   ├── AdminController.php      # Dashboards & profile
-│   │   └── AuditController.php      # Audit log viewer
-│   │
+│   ├── controllers/          # Auth, Admin, Landing, Student, Room, …
 │   ├── models/
-│   │   ├── User.php             # User CRUD + login tracking
-│   │   ├── Student.php          # Student CRUD with user link
-│   │   ├── Room.php             # Room management + occupancy
-│   │   ├── Allocation.php       # Allocation + waitlist logic
-│   │   ├── Payment.php          # Payment recording + receipts
-│   │   ├── Complaint.php        # Complaint + SLA tracking
-│   │   ├── Notice.php           # Notice CRUD
-│   │   └── AuditLog.php         # Immutable audit logging
-│   │
-│   └── helpers/
-│       ├── auth.php             # Auth checks, role guards, flash
-│       ├── csrf.php             # CSRF token management
-│       ├── sanitize.php         # Input sanitization functions
-│       └── upload.php           # Secure file upload handler
-│
-├── views/
-│   ├── layouts/
-│   │   ├── main.php             # Dashboard layout (sidebar+nav)
-│   │   ├── auth.php             # Login/reset layout
-│   │   └── partials/
-│   │       ├── navbar.php       # Top navigation bar
-│   │       ├── sidebar.php      # Sidebar navigation
-│   │       └── footer.php       # Footer
-│   │
-│   ├── auth/
-│   │   ├── login.php            # Login form
-│   │   └── forgot-password.php  # Password reset flow
-│   │
-│   ├── dashboard/
-│   │   ├── admin.php            # Admin KPI dashboard
-│   │   ├── student.php          # Student self-service dashboard
-│   │   └── staff.php            # Staff ticket dashboard
-│   │
-│   ├── students/                # Student CRUD views
-│   ├── rooms/                   # Room + allocation views
-│   ├── payments/                # Payment + receipt views
-│   ├── complaints/              # Complaint management views
-│   ├── notices/                 # Notice board views
-│   ├── audit/                   # Audit log viewer
-│   └── errors/
-│       └── 404.php              # Custom 404 page
-│
-├── public/
-│   ├── css/custom.css           # Custom design system
-│   ├── js/main.js               # Client-side interactions
-│   ├── images/                  # Static images
-│   └── uploads/                 # User uploads (gitignored)
-│
+│   └── helpers/              # auth, csrf, sanitize, upload
+├── views/                    # Layouts + feature views
+├── public/                   # css, js, images, uploads
 ├── database/
-│   ├── hostelease.sql           # Complete MySQL schema
+│   ├── hostelease.sql
+│   ├── migrations/
 │   └── seeds/
-│       └── admin_seed.php       # Default admin creator
-│
-├── logs/                        # Error logs (gitignored)
-├── README.md                    # This file
-└── DOCUMENTATION.md             # Full technical documentation
+├── logs/                     # error.log (gitignored)
+├── README.md
+└── DOCUMENTATION.md          # Technical deep-dive
 ```
 
 ---
 
-## 👥 User Roles & Permissions
+## Security highlights
 
-| Role         | Access Level            | Capabilities                                    |
-|:-------------|:------------------------|:------------------------------------------------|
-| Super Admin  | Full system access      | Manage admins, audit logs, all reports          |
-| Admin/Warden | Hostel-level access     | Students, rooms, payments, complaints, notices  |
-| Student      | Own profile only        | View room, payment history, submit complaints   |
-| Staff        | Assigned tasks only     | View & update assigned complaint tickets        |
+- Prepared statements only; CSRF on state-changing forms; output escaping; bcrypt; login lockout; upload MIME checks; sensitive paths blocked by `.htaccess`; errors logged to `logs/`, not shown in production.
 
 ---
 
-## 📦 Modules Overview
+## Routes (quick reference)
 
-### 1. Authentication Module
-- Login with email/password
-- bcrypt password hashing
-- Login throttling: 5 failed attempts → 15 minute lockout
-- Token-based password reset
-- CSRF token on all forms
-- Role-based dashboard redirect
+URLs use the query form: `BASE_URL?url=controller/action/id`
 
-### 2. Student Management
-- Full CRUD (Create, Read, Update, Delete)
-- Profile photo upload with MIME validation
-- Student ID card/NID document upload
-- Search by name, ID, or email
-- Active/Suspended/Inactive status lifecycle
+| Example `url` | Description |
+|-----------------|-------------|
+| *(empty)* | `LandingController::index` — home |
+| `auth/login`, `auth/logout` | Authentication |
+| `dashboard/index` | Admin / Super Admin dashboard |
+| `dashboard/student`, `dashboard/staff` | Role dashboards |
+| `students/index`, `students/create`, … | Student management |
+| `rooms/index`, `allocations/allocate`, … | Rooms & allocations |
+| `payments/index`, `payments/record`, `payments/makePayment`, … | Payments |
+| `profile/index`, `profile/edit` | Profile |
+| `users/index`, `users/create` | Users (Super Admin) |
+| `payroll/index`, `payroll/review`, `payroll/distribute` | Payroll |
+| `finances/index` | Finance (Super Admin) |
+| `audit/index` | Audit log (Super Admin) |
 
-### 3. Room Management
-- Room inventory with number, type, floor, capacity
-- Real-time occupancy tracking with progress bars
-- Filter by status, type, and floor
-- Facilities description
-
-### 4. Room Allocation
-- Allocate student to room with capacity check
-- Transfer between rooms (closes old, opens new)
-- Vacate from room
-- Waitlist queue when rooms are full
-- Complete allocation history
-
-### 5. Payment Management
-- Manual payment recording (cash/bank/online)
-- Auto-generated receipt numbers: `RCP-YYYYMM-XXXX`
-- Fee structure management (monthly, one-time, yearly)
-- Payment history with filters
-- Printable receipt view
-- Outstanding payment tracking
-
-### 6. Complaint Management
-- Student submits tickets with category and priority
-- Admin assigns tickets to staff
-- Status workflow: Open → In Progress → Resolved → Closed
-- **SLA Tracking**: High priority flagged after 24h, Medium after 72h
-- Overdue ticket highlighting
-
-### 7. Notice Board
-- Admin posts announcements
-- Pinned notices appear first
-- All users can view notices
-- Edit/delete for admins
-
-### 8. Audit Logging
-- Every CUD operation logged automatically
-- Records: user, action, table, record ID, details, IP, timestamp
-- Viewable only by Super Admin
-- Filterable by action, table, and date range
+A longer route table lives in [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ---
 
-## 🔒 Security Features
+## Contributing
 
-| Layer              | Implementation                                      |
-|:-------------------|:----------------------------------------------------|
-| SQL Injection      | PDO prepared statements only — zero string concat   |
-| XSS               | `htmlspecialchars()` on all output via `e()` helper  |
-| CSRF               | Token on every POST form, `verifyToken()` in controllers |
-| Passwords          | `password_hash()` bcrypt (cost 12)                  |
-| Session            | Regenerate ID on login, httponly cookies, SameSite   |
-| File Uploads       | `finfo_file()` MIME check + extension whitelist      |
-| Login Throttle     | 5 failures → 15 min lockout via `login_attempts` table |
-| Role Guard         | `requireRole()` at top of every protected action     |
-| Directory Access   | `.htaccess` blocks `app/`, `config/`, `database/`    |
-| Error Display      | `display_errors = Off`, logged to file only          |
-| Security Headers   | X-Frame-Options, X-Content-Type-Options, Referrer-Policy |
+1. Fork the repository and create a branch for your change.
+2. Keep commits focused; match existing code style.
+3. Open a pull request with a clear description.
 
 ---
 
-## 🗺 Routes Reference
+## License
 
-| URL                          | Controller::Action                  | Access                |
-|:-----------------------------|:------------------------------------|:----------------------|
-| `?url=auth/login`            | AuthController::login()             | Public                |
-| `?url=auth/logout`           | AuthController::logout()            | Authenticated         |
-| `?url=auth/forgot-password`  | AuthController::forgotPassword()    | Public                |
-| `?url=dashboard/index`       | AdminController::dashboard()        | Admin, Super Admin    |
-| `?url=dashboard/student`     | AdminController::student()          | Student               |
-| `?url=dashboard/staff`       | AdminController::staff()            | Staff                 |
-| `?url=students/index`        | StudentController::index()          | Admin, Super Admin    |
-| `?url=students/create`       | StudentController::create()         | Admin, Super Admin    |
-| `?url=students/show/{id}`    | StudentController::show()           | Admin, Student (own)  |
-| `?url=students/edit/{id}`    | StudentController::edit()           | Admin, Super Admin    |
-| `?url=rooms/index`           | RoomController::index()             | Admin, Super Admin    |
-| `?url=rooms/create`          | RoomController::create()            | Admin, Super Admin    |
-| `?url=allocations/allocate`  | AllocationController::allocate()    | Admin, Super Admin    |
-| `?url=allocations/transfer`  | AllocationController::transfer()    | Admin, Super Admin    |
-| `?url=payments/index`        | PaymentController::index()          | Admin, Super Admin    |
-| `?url=payments/record`       | PaymentController::record()         | Admin, Super Admin    |
-| `?url=complaints/index`      | ComplaintController::index()        | All authenticated     |
-| `?url=complaints/create`     | ComplaintController::create()       | All authenticated     |
-| `?url=notices/index`         | NoticeController::index()           | All authenticated     |
-| `?url=audit/index`           | AuditController::index()            | Super Admin only      |
+This project is released under the **MIT License**. You may use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, subject to the usual MIT conditions.
 
 ---
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-## 📞 Support
-
-For questions or issues, please open a GitHub Issue or contact the development team.
-
----
-
-**Built with ❤️ by the HostelEase Team**
+**HostelEase** — built for university and hostel administration workflows.

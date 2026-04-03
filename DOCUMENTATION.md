@@ -1,589 +1,312 @@
 # HostelEase — Technical Documentation
 
 **Version:** 1.0.0  
-**Last Updated:** April 3, 2026
+**Last updated:** April 3, 2026
+
+This document describes architecture, configuration, security, database concepts, routing, and deployment for developers and operators. The **user-facing overview** is in [README.md](README.md).
 
 ---
 
-## Table of Contents
+## Table of contents
 
-1. [Architecture Overview](#1-architecture-overview)
-2. [MVC Pattern Implementation](#2-mvc-pattern-implementation)
-3. [Database Schema Documentation](#3-database-schema-documentation)
-4. [Authentication System](#4-authentication-system)
-5. [Routing System](#5-routing-system)
-6. [Security Implementation](#6-security-implementation)
-7. [Module Documentation](#7-module-documentation)
-8. [Helper Functions Reference](#8-helper-functions-reference)
-9. [Configuration Reference](#9-configuration-reference)
-10. [Deployment Guide](#10-deployment-guide)
-11. [Troubleshooting](#11-troubleshooting)
-12. [API / Route Reference](#12-api--route-reference)
+1. [Architecture overview](#1-architecture-overview)
+2. [MVC and request lifecycle](#2-mvc-and-request-lifecycle)
+3. [Routing](#3-routing)
+4. [Configuration and environment](#4-configuration-and-environment)
+5. [Database](#5-database)
+6. [Authentication and sessions](#6-authentication-and-sessions)
+7. [Authorization by role](#7-authorization-by-role)
+8. [Module notes](#8-module-notes)
+9. [Helpers](#9-helpers)
+10. [Security](#10-security)
+11. [Deployment](#11-deployment)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Route reference](#13-route-reference)
 
 ---
 
-## 1. Architecture Overview
+## 1. Architecture overview
 
-HostelEase follows a custom **MVC (Model-View-Controller)** architecture without any PHP framework.
+HostelEase is a **custom PHP MVC** application: no Composer framework. HTTP requests hit `index.php`, which loads configuration, session, helpers, resolves `controller` + `action` + `params`, instantiates the matching controller class, and invokes the action method.
 
 ```
-┌─────────────────────────────────────────────────┐
-│                    Browser                       │
-│             (HTTP Request)                       │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────┐
-│              .htaccess                           │
-│    URL Rewriting → index.php?url=...             │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────┐
-│            index.php (Router)                    │
-│    ┌──────────────────────────────────┐          │
-│    │ 1. Load config, session, helpers │          │
-│    │ 2. Parse URL → controller/action │          │
-│    │ 3. Instantiate controller        │          │
-│    │ 4. Call action method            │          │
-│    └──────────────────────────────────┘          │
-└────────────────────┬────────────────────────────┘
-                     │
-         ┌───────────┼───────────┐
-         ▼           ▼           ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │Controller│ │  Model   │ │  View    │
-   │          │→│(Database)│ │(HTML/PHP)│
-   │ Business │ │  PDO     │ │Bootstrap │
-   │ Logic    │ │ Queries  │ │Templates │
-   └──────────┘ └──────────┘ └──────────┘
+Browser → Apache (.htaccess) → index.php?url=... → Controller → Model (PDO) → View (PHP templates)
 ```
-
-### Request Lifecycle
-
-1. User sends HTTP request
-2. `.htaccess` rewrites URL to `index.php?url=controller/action/params`
-3. `index.php` loads configuration, starts session, includes helpers
-4. Router parses the URL and maps to a controller class and method
-5. Controller checks authentication and authorization
-6. Controller interacts with Models (database operations)
-7. Controller passes data to View for rendering
-8. View outputs HTML using the layout template
-9. Response is sent back to the browser
 
 ---
 
-## 2. MVC Pattern Implementation
+## 2. MVC and request lifecycle
 
 ### Controllers (`app/controllers/`)
 
-Controllers handle the business logic. Each controller:
-- Extends no base class (pure PHP, no framework)
-- Calls `requireRole()` at the start of each protected method
-- Validates CSRF tokens on POST requests
-- Uses Models for database operations
-- Passes data to Views via PHP variables
-- Calls `AuditLog::log()` after mutations
-
-**Pattern:**
-```php
-class ExampleController {
-    private ExampleModel $model;
-    
-    public function __construct() {
-        $this->model = new ExampleModel();
-    }
-    
-    public function index(): void {
-        requireRole(['admin', 'super_admin']);
-        
-        $data = $this->model->all();
-        $pageTitle = 'Example List';
-        
-        ob_start();
-        require_once APP_ROOT . '/views/example/index.php';
-        $viewContent = ob_get_clean();
-        require_once APP_ROOT . '/views/layouts/main.php';
-    }
-}
-```
+- One class per area (`AuthController`, `StudentController`, …).
+- Protected actions call `requireAuth()` / `requireRole([...])` from `app/helpers/auth.php`.
+- POST actions should call `verifyToken()` (CSRF) for `csrf.php`.
+- Typical pattern: compute data → `ob_start()` → `require` view → `ob_get_clean()` → `require` layout `views/layouts/main.php` or `auth.php`.
 
 ### Models (`app/models/`)
 
-Models handle all database operations using PDO prepared statements.
-
-**Key Principles:**
-- Every query uses parameterized placeholders (`:param` syntax)
-- Models include the `Database` singleton via `Database::getInstance()`
-- Return types are strictly typed (`array|false`, `int`, `bool`)
-- Complex operations use database transactions
+- Use `Database::getInstance()` for PDO.
+- Prepared statements only; return types documented in code.
 
 ### Views (`views/`)
 
-Views are PHP template files that render HTML.
-
-**Rendering Pattern:**
-```php
-// In the controller:
-ob_start();
-require_once APP_ROOT . '/views/example/index.php';
-$viewContent = ob_get_clean();
-require_once APP_ROOT . '/views/layouts/main.php';
-```
-
-The view file generates HTML, captured into `$viewContent` via output buffering. The layout template (`main.php` or `auth.php`) wraps it with the sidebar, navbar, and footer.
+- PHP templates; user-facing strings escaped with `e()` / `escape()` where appropriate.
 
 ---
 
-## 3. Database Schema Documentation
+## 3. Routing
 
-### Entity Relationship Overview
+### URL shape
 
 ```
-users (1) ─────── (1) students
-  │                     │
-  │                     ├── (N) allocations ──── (1) rooms
-  │                     ├── (N) payments ─────── (1) fee_structures
-  │                     ├── (N) complaints
-  │                     └── (N) waitlist
-  │
-  ├── (N) notices
-  ├── (N) audit_logs
-  ├── (N) password_resets
-  └── (N) login_attempts
+GET /index.php?url=controller/action/param1/param2
 ```
 
-### Table Details
+With rewrite rules, the same path may appear as:
 
-#### `users`
-| Column         | Type          | Constraints          | Description                    |
-|:---------------|:-------------|:---------------------|:-------------------------------|
-| id             | INT UNSIGNED  | PK, AUTO_INCREMENT   | Unique user ID                 |
-| full_name      | VARCHAR(100)  | NOT NULL             | User's full name               |
-| email          | VARCHAR(150)  | UNIQUE, NOT NULL     | Login email                    |
-| password_hash  | VARCHAR(255)  | NOT NULL             | bcrypt hashed password         |
-| role           | ENUM          | NOT NULL             | super_admin/admin/student/staff|
-| status         | ENUM          | DEFAULT 'active'     | active/suspended/inactive      |
-| profile_photo  | VARCHAR(255)  | NULL                 | Photo filename                 |
-| created_at     | TIMESTAMP     | AUTO                 | Creation timestamp             |
-| updated_at     | TIMESTAMP     | AUTO ON UPDATE       | Last update timestamp          |
+```
+GET /controller/action/param1/param2
+```
 
-#### `students`
-| Column         | Type          | Constraints          | Description                    |
-|:---------------|:-------------|:---------------------|:-------------------------------|
-| id             | INT UNSIGNED  | PK, AUTO_INCREMENT   | Unique student ID              |
-| user_id        | INT UNSIGNED  | FK → users, UNIQUE   | Linked user account            |
-| student_id_no  | VARCHAR(30)   | UNIQUE, NOT NULL     | Student identification number  |
-| phone          | VARCHAR(20)   | NULL                 | Phone number                   |
-| guardian_name  | VARCHAR(100)  | NULL                 | Guardian's name                |
-| guardian_phone | VARCHAR(20)   | NULL                 | Guardian's phone               |
-| nid_or_card    | VARCHAR(255)  | NULL                 | ID document filename           |
-| enrolled_date  | DATE          | NULL                 | Enrollment date                |
-| checkout_date  | DATE          | NULL                 | Checkout date (if left)        |
+### Default route
 
-#### `rooms`
-| Column      | Type          | Constraints        | Description                     |
-|:------------|:-------------|:-------------------|:--------------------------------|
-| id          | INT UNSIGNED  | PK, AUTO_INCREMENT | Unique room ID                  |
-| room_number | VARCHAR(20)   | UNIQUE, NOT NULL   | Room identification number      |
-| floor       | TINYINT       | NULL               | Floor number                    |
-| type        | ENUM          | DEFAULT 'single'   | single/double/triple/dormitory  |
-| capacity    | TINYINT       | NOT NULL, DEFAULT 1| Maximum occupants               |
-| facilities  | TEXT          | NULL               | Room facilities description     |
-| status      | ENUM          | DEFAULT 'available'| available/full/maintenance      |
+If `url` is empty or `/`, the router uses `LandingController::index`.
 
-#### `allocations`
-| Column       | Type         | Constraints        | Description                     |
-|:-------------|:------------|:-------------------|:--------------------------------|
-| id           | INT UNSIGNED | PK, AUTO_INCREMENT | Unique allocation ID            |
-| student_id   | INT UNSIGNED | FK → students      | Allocated student               |
-| room_id      | INT UNSIGNED | FK → rooms         | Target room                     |
-| allocated_by | INT UNSIGNED | FK → users, NULL   | Admin who allocated             |
-| start_date   | DATE         | NOT NULL           | Start of allocation             |
-| end_date     | DATE         | NULL               | End (if transferred/vacated)    |
-| status       | ENUM         | DEFAULT 'active'   | active/transferred/vacated      |
-| notes        | TEXT         | NULL               | Additional notes                |
+### Controller map (`index.php`)
 
-#### `payments`
-| Column         | Type          | Constraints        | Description                  |
-|:---------------|:-------------|:-------------------|:-----------------------------|
-| id             | INT UNSIGNED  | PK, AUTO_INCREMENT | Unique payment ID            |
-| student_id     | INT UNSIGNED  | FK → students      | Paying student               |
-| fee_id         | INT UNSIGNED  | FK → fee_structures| Fee type                     |
-| amount_paid    | DECIMAL(10,2) | NOT NULL           | Amount paid                  |
-| payment_date   | DATE          | NOT NULL           | Date of payment              |
-| receipt_no     | VARCHAR(50)   | UNIQUE, NOT NULL   | Auto-generated receipt number|
-| payment_method | ENUM          | DEFAULT 'cash'     | cash/bank/online             |
-| month_year     | VARCHAR(10)   | NULL               | Payment period (YYYY-MM)     |
-| recorded_by    | INT UNSIGNED  | FK → users, NULL   | Admin who recorded           |
+| URL segment (capitalized) | Controller class |
+|---------------------------|------------------|
+| `Landing` | `LandingController` |
+| `Auth` | `AuthController` |
+| `Users` / `User` | `UserController` |
+| `Students` / `Student` | `StudentController` |
+| `Rooms` / `Room` | `RoomController` |
+| `Allocations` / `Allocation` | `AllocationController` |
+| `Payments` / `Payment` | `PaymentController` |
+| `Complaints` / `Complaint` | `ComplaintController` |
+| `Notices` / `Notice` | `NoticeController` |
+| `Dashboard` / `Admin` | `AdminController` |
+| `Audit` | `AuditController` |
+| `Profile` | `ProfileController` |
+| `Payroll` | `PayrollController` |
+| `Finances` / `Finance` | `FinanceController` |
 
-#### `complaints`
-| Column      | Type         | Constraints        | Description                     |
-|:------------|:------------|:-------------------|:--------------------------------|
-| id          | INT UNSIGNED | PK, AUTO_INCREMENT | Unique complaint ID             |
-| student_id  | INT UNSIGNED | FK → students      | Submitting student              |
-| category    | VARCHAR(100) | NOT NULL           | Complaint category              |
-| description | TEXT         | NOT NULL           | Detailed description            |
-| priority    | ENUM         | DEFAULT 'medium'   | low/medium/high                 |
-| status      | ENUM         | DEFAULT 'open'     | open/in_progress/resolved/closed|
-| assigned_to | INT UNSIGNED | FK → users, NULL   | Assigned staff member           |
-| resolved_at | TIMESTAMP    | NULL               | Resolution timestamp            |
+### Action names
 
-**SLA Rules:**
-- **High Priority:** Flagged as overdue if unresolved after **24 hours**
-- **Medium Priority:** Flagged as overdue if unresolved after **72 hours**
-- Low priority complaints have no SLA
+The second path segment is the action name. Hyphens are converted to **camelCase** (e.g. `forgot-password` → `forgotPassword`).
+
+Remaining segments are passed as **arguments** to the action method.
 
 ---
 
-## 4. Authentication System
+## 4. Configuration and environment
 
-### Login Flow
+### `config/config.php`
 
-```
-User submits email + password
-  │
-  ├── Check login throttle (max 5 attempts per 15 min)
-  │   └── If locked out → show error
-  │
-  ├── Find user by email
-  │   └── If not found → record attempt, show error
-  │
-  ├── Verify password with password_verify()
-  │   └── If wrong → record attempt, show error
-  │
-  ├── Check user status (must be 'active')
-  │   └── If suspended → show error
-  │
-  ├── Clear login attempts
-  ├── Regenerate session ID (prevent fixation)
-  ├── Store user data in session
-  ├── Log audit entry
-  └── Redirect to role-based dashboard
-```
+- Loads optional `.env` in `APP_ROOT` via `loadEnvFile()` (does not override real OS environment variables).
+- Defines `APP_ENV`, `APP_NAME`, `BASE_URL`, database constants, upload limits, session name, CSRF name, SLA hours, receipt prefix, timezone (`Asia/Dhaka`), and error logging.
 
-### Session Data Structure
+### `BASE_URL` behavior
 
-```php
-$_SESSION = [
-    'user_id'      => 1,
-    'user_name'    => 'System Administrator',
-    'user_email'   => 'admin@hostelease.com',
-    'user_role'    => 'super_admin',
-    'user_photo'   => null,
-    'logged_in_at' => 1712137620,
-    'last_activity'=> 1712137620,
-    '_csrf_token'  => 'a1b2c3d4...',
-];
-```
+- If `BASE_URL` is set in the environment **and** is not treated as invalid for production, it is normalized with a trailing slash.
+- **Production safety:** If `APP_ENV` is not `development`, a `BASE_URL` containing `localhost`, `127.0.0.1`, or `0.0.0.0` is **ignored** so links are not forced to localhost on PaaS hosts.
+- Otherwise `BASE_URL` is derived from the request: `HTTPS` / `X-Forwarded-Proto` for scheme, `HTTP_HOST` for host.
 
-### Password Reset Flow
+This is important on **Render** and similar proxies: set `APP_ENV=production` and either omit `BASE_URL` or set it to your public `https://…` URL.
 
-1. User enters email → system generates random token
-2. Token stored in `password_resets` table with expiry (1 hour)
-3. User enters token + new password
-4. System validates token (not expired, not used)
-5. Password updated, token marked as used
+### `config/database.php`
+
+- Singleton PDO; DSN includes `sslmode=require` when `DB_SSL` is true (common for managed MySQL).
+- Optional `PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false` when SSL is on to avoid CA file issues in some environments.
+
+### Recommended `.env` keys
+
+| Key | Notes |
+|-----|--------|
+| `APP_ENV` | `development` locally; `production` on Render. |
+| `BASE_URL` | Optional; must match how users reach the app in dev. |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` | Required for DB access. |
+| `DB_SSL` | `true` for Aiven and similar SSL-only endpoints. |
+| `SUPER_ADMIN_PASS_HASH` | Optional; virtual super-admin fallback in auth flow. |
 
 ---
 
-## 5. Routing System
+## 5. Database
 
-### URL Format
+### Base schema
 
-```
-http://localhost/hostelease/?url=controller/action/param1/param2
-```
+`database/hostelease.sql` creates core tables: `users`, `students`, `rooms`, `allocations`, `waitlist`, `fee_structures`, `payments`, `complaints`, `notices`, `audit_logs`, `password_resets`, `login_attempts`, `transactions`, etc.
 
-### Controller Mapping
+### Payroll migration
 
-```php
-$controllerMap = [
-    'Auth'        => 'AuthController',
-    'Students'    => 'StudentController',
-    'Rooms'       => 'RoomController',
-    'Allocations' => 'AllocationController',
-    'Payments'    => 'PaymentController',
-    'Complaints'  => 'ComplaintController',
-    'Notices'     => 'NoticeController',
-    'Dashboard'   => 'AdminController',
-    'Admin'       => 'AdminController',
-    'Audit'       => 'AuditController',
-];
-```
+`database/migrations/migrate_payroll.php` ensures `transactions`, `staff_details`, and `pay_slips` exist and align with the ledger/payroll features. Run after schema import if you use payroll.
 
-### URL Parsing Logic
+### Seeding
 
-1. Read `$_GET['url']`, sanitize, split by `/`
-2. First segment → controller name (ucfirst)
-3. Second segment → action name (camelCase from hyphens)
-4. Remaining segments → method parameters
+`database/seeds/admin_seed.php` creates the first `super_admin` if `admin@hostelease.com` does not exist.
+
+### Entity relationships (high level)
+
+- `users` ↔ `students` (one-to-one when a student account exists).
+- `students` → `allocations` → `rooms`; `waitlist` queues students when rooms are full.
+- `payments` link to `students` and `fee_structures`.
+- `transactions` record income/expense for payments and payroll (`reference_type` / `reference_id`).
+- `pay_slips` / `staff_details` support the payroll workflow.
 
 ---
 
-## 6. Security Implementation
+## 6. Authentication and sessions
 
-### CSRF Protection
-
-Every POST form includes:
-```html
-<input type="hidden" name="_csrf_token" value="abc123...">
-```
-
-Generated via `csrfField()` helper. Verified in controller:
-```php
-if (!verifyToken()) {
-    setFlash('error', 'Invalid security token.');
-    // redirect back
-}
-```
-
-Token is regenerated after each verification to prevent replay attacks.
-
-### Input Sanitization
-
-All user input is sanitized before processing:
-- `sanitize()` — strips tags, trims whitespace
-- `sanitizeEmail()` — validates email format
-- `sanitizeInt()` — casts to integer
-- `sanitizeFloat()` — casts to float
-- `sanitizeDate()` — validates Y-m-d format
-- `sanitizePhone()` — removes non-phone characters
-
-All output is escaped:
-- `e()` / `escape()` — wraps `htmlspecialchars(ENT_QUOTES, UTF-8)`
-
-### File Upload Security
-
-```php
-// 1. Validate extension (whitelist)
-// 2. Validate MIME type via finfo_file() (NOT trusting $_FILES['type'])
-// 3. Rename to uniqid() (prevent directory traversal)
-// 4. Move to designated upload directory
-// 5. .htaccess blocks PHP execution in upload dirs
-```
+- Login validates credentials, checks account status, clears lockout on success, regenerates session ID, stores `user_id`, role, email, name, photo, etc.
+- Failed attempts are tracked in `login_attempts` (see `MAX_LOGIN_ATTEMPTS`, `LOGIN_LOCKOUT_TIME` in `config.php`).
+- Password reset uses `password_resets` with expiry.
 
 ---
 
-## 7. Module Documentation
+## 7. Authorization by role
 
-### Payment Receipt Number Format
+| Area | super_admin | admin | student | staff |
+|------|-------------|-------|---------|-------|
+| User management (`UserController`) | Yes | — | — | — |
+| Student/room CRUD, allocations | Yes | Yes | — | — |
+| Record manual student payment (`payments/record`, `store`) | No | Yes | — | — |
+| Payment list / receipts (oversight) | Yes | Yes | Own / scoped | Own / scoped |
+| Online fee portal (`makePayment`, `processPortal`) | **No** | Yes (if student profile) | Yes | Yes (if student profile) |
+| Payroll: apply (`payroll/index`, `apply`) | — | Yes | — | Yes |
+| Payroll: review/approve (`payroll/review`, `processApproval`) | Yes | Yes | — | — |
+| Payroll: distribute/pay (`payroll/distribute`, `pay`) | **Yes** | — | — | — |
+| Finance (`finances/index`) | Yes | — | — | — |
+| Audit log | Yes | — | — | — |
 
-```
-RCP-YYYYMM-XXXX
-│    │       │
-│    │       └── Sequential 4-digit number (auto-incremented per month)
-│    └────────── Year and month (e.g., 202604)
-└──────────────── Fixed prefix
-```
-
-Example: `RCP-202604-0001`, `RCP-202604-0002`
-
-### Allocation Business Logic
-
-```
-1. Admin selects student + room
-2. System checks: does student have active allocation?
-   → Yes: Error "Transfer or vacate first"
-3. System checks room capacity
-   → Full: Add to waitlist, show warning
-   → Available: Proceed to allocate
-4. Create allocation record (status: 'active')
-5. Refresh room status (auto-update to 'full' if at capacity)
-6. Log audit entry
-```
-
-### Complaint SLA Engine
-
-```
-For each unresolved complaint:
-  hours_open = NOW() - created_at (in hours)
-  
-  If priority == 'high' AND hours_open > 24:
-    → Mark as SLA overdue
-  If priority == 'medium' AND hours_open > 72:
-    → Mark as SLA overdue
-    
-  Display red row in complaints table
-  Show alert on admin dashboard
-```
+**Super Admin** focuses on payroll disbursement and system-wide oversight; **student fee collection** (manual or portal) is handled by **admin** (and eligible students/staff with a student profile).
 
 ---
 
-## 8. Helper Functions Reference
+## 8. Module notes
 
-### auth.php
+### Payments
 
-| Function            | Returns   | Description                              |
-|:--------------------|:----------|:-----------------------------------------|
-| `isLoggedIn()`      | `bool`    | Checks if user has active session        |
-| `currentUser()`     | `?array`  | Returns current user's session data      |
-| `hasRole($roles)`   | `bool`    | Checks if user has specified role(s)     |
-| `requireRole($r)`   | `void`    | Redirects if unauthorized                |
-| `requireAuth()`     | `void`    | Redirects if not logged in               |
-| `setFlash($t, $m)`  | `void`    | Sets a flash message                     |
-| `getFlash($type)`   | `?string` | Gets and clears a flash message          |
-| `getClientIP()`     | `string`  | Returns client's IP address              |
+- Receipt numbers are generated with prefix `RECEIPT_PREFIX` (e.g. `RCP-YYYYMM-XXXX`).
+- Portal amounts should be validated against `fee_structures` in the controller (not trusted blindly from the client).
 
-### csrf.php
+### Allocations and automation
 
-| Function          | Returns   | Description                               |
-|:------------------|:----------|:------------------------------------------|
-| `generateToken()` | `string`  | Returns the current CSRF token            |
-| `verifyToken($t)` | `bool`    | Validates submitted token, regenerates    |
-| `csrfField()`     | `string`  | Outputs hidden HTML input with token      |
+- When a student **vacates** and the room has capacity, logic can assign the next **waitlist** entry to that room (see `AllocationController::vacate`).
 
-### sanitize.php
+### Payroll
 
-| Function           | Returns   | Description                              |
-|:-------------------|:----------|:-----------------------------------------|
-| `sanitize($str)`   | `string`  | Strip tags + trim                        |
-| `sanitizeEmail()`  | `string`  | Validate + sanitize email                |
-| `e($str)`          | `string`  | htmlspecialchars shorthand               |
-| `sanitizeInt()`    | `int`     | Cast to integer                          |
-| `sanitizeFloat()`  | `float`   | Cast to float                            |
-| `sanitizeDate()`   | `?string` | Validate Y-m-d format                   |
-| `sanitizePhone()`  | `string`  | Keep digits, +, -, spaces only           |
+1. Staff (and admin with staff payroll) apply for a monthly slip.
+2. Admin/super_admin review and approve with bonuses/deductions.
+3. Super admin **distributes** salary and marks slips paid; an **expense** row is written to `transactions`.
+
+### Super Admin UI indicators
+
+- Pending payroll slip count may be shown in the navbar/sidebar for quick review.
+
+### Profile
+
+- `ProfileController` updates `users` (name, phone, photo). Student-linked rows may sync phone to `students` where applicable. Student IDs and immutable identifiers are not exposed for self-edit.
+
+### User creation (Super Admin)
+
+- Optional **hostel occupant** student record for admin/staff enables room allocation and billing like a student.
 
 ---
 
-## 9. Configuration Reference
+## 9. Helpers
 
-### config.php Constants
-
-| Constant              | Default Value                  | Description                   |
-|:----------------------|:-------------------------------|:------------------------------|
-| `APP_NAME`            | `'HostelEase'`                 | Application display name      |
-| `APP_VERSION`         | `'1.0.0'`                      | Current version               |
-| `BASE_URL`            | `'http://localhost/hostelease/'`| Base URL with trailing slash  |
-| `DB_HOST`             | `'127.0.0.1'`                  | MySQL host                    |
-| `DB_PORT`             | `'3306'`                       | MySQL port                    |
-| `DB_NAME`             | `'hostelease'`                 | Database name                 |
-| `DB_USER`             | `'root'`                       | Database username             |
-| `DB_PASS`             | `''`                           | Database password             |
-| `UPLOAD_MAX_SIZE`     | `5242880` (5MB)                | Max upload size in bytes      |
-| `SESSION_LIFETIME`    | `3600` (1 hour)                | Session timeout in seconds    |
-| `MAX_LOGIN_ATTEMPTS`  | `5`                            | Max failed logins             |
-| `LOGIN_LOCKOUT_TIME`  | `900` (15 min)                 | Lockout duration in seconds   |
-| `SLA_HIGH_PRIORITY_HOURS`   | `24`                     | SLA for high priority         |
-| `SLA_MEDIUM_PRIORITY_HOURS` | `72`                     | SLA for medium priority       |
-| `RECEIPT_PREFIX`      | `'RCP'`                        | Payment receipt prefix        |
+| File | Purpose |
+|------|---------|
+| `auth.php` | `isLoggedIn`, `currentUser`, `hasRole`, `requireRole`, `requireAuth`, flash messages, redirect helpers |
+| `csrf.php` | `generateToken`, `verifyToken`, `csrfField` |
+| `sanitize.php` | `sanitize`, `sanitizeInt`, `sanitizeEmail`, `sanitizePhone`, `sanitizeDate`, `escape` / `e` |
+| `upload.php` | Validated file uploads with size/type checks |
 
 ---
 
-## 10. Deployment Guide
+## 10. Security
 
-### Production Checklist
-
-1. **Change database credentials** in `config/config.php`
-2. **Update `BASE_URL`** to your production domain
-3. **Change default admin password** immediately after first login
-4. **Enable HTTPS** and set `'secure' => true` in `session.php` cookie params
-5. **Disable error display** (already configured in `config.php`)
-6. **Set file permissions:**
-   ```bash
-   chmod 755 public/uploads/students
-   chmod 755 public/uploads/documents
-   chmod 755 logs
-   chmod 644 config/config.php
-   ```
-7. **Enable Apache modules:** `mod_rewrite`, `mod_headers`, `mod_expires`
-8. **Verify `.htaccess`** is being processed (AllowOverride All)
-9. **Set timezone** in `config.php` to your production timezone
-10. **Back up database** before any schema changes
-
-### Environment-Specific Settings
-
-```php
-// Production
-define('BASE_URL', 'https://yourdomain.com/');
-ini_set('display_errors', '0');
-ini_set('log_errors', '1');
-
-// Development (XAMPP)
-define('BASE_URL', 'http://localhost/hostelease/');
-ini_set('display_errors', '1'); // Only for debugging
-```
+- **SQL:** PDO prepared statements only.
+- **XSS:** Escape output in views; use helpers consistently.
+- **CSRF:** Tokens on POST forms; verify in controllers.
+- **Passwords:** `password_hash` / `password_verify` (bcrypt).
+- **Sessions:** Configured in `config/session.php`; secure cookie flags should be set for HTTPS in production.
+- **Uploads:** MIME checks, whitelist extensions, unique filenames; `.htaccess` blocks executing PHP under `public/uploads`.
+- **Errors:** `display_errors` off; log to `logs/error.log` in production.
 
 ---
 
-## 11. Troubleshooting
+## 11. Deployment
 
-### Common Issues
+### Render (Docker)
 
-| Issue                              | Solution                                          |
-|:-----------------------------------|:--------------------------------------------------|
-| 404 on all pages                   | Enable `mod_rewrite` in Apache, check `.htaccess` |
-| Database connection error          | Verify MySQL is running, check `config.php` creds |
-| CSRF token invalid                 | Clear browser cookies, start a fresh session       |
-| File upload fails                  | Check `upload_max_filesize` in `php.ini`          |
-| Session expires too quickly        | Increase `SESSION_LIFETIME` in `config.php`       |
-| Blank page                         | Enable `display_errors` temporarily for debugging |
-| Login always fails                 | Run `admin_seed.php` again, check password hash   |
-| Photos not showing                 | Check `public/uploads/students/` permissions      |
+1. **Root directory:** `hostelease` if the repo contains that subfolder.
+2. **Environment** — Set `APP_ENV=production`, all `DB_*` variables, `DB_SSL=true` if required, and `DB_PASS`.
+3. **`BASE_URL`** — Either unset (derive from request) or `https://<your-service>.onrender.com/`.
+4. **Database** — Import SQL, run `admin_seed.php`, then `migrate_payroll.php` if needed.
 
-### Enabling Debug Mode (Development Only)
+### Apache
 
-Temporarily edit `config/config.php`:
-```php
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-```
+- Enable `mod_rewrite`, `mod_headers`, `mod_expires` as needed.
+- `AllowOverride All` for the app directory so `.htaccess` applies.
 
-**⚠️ Never enable this in production!**
+### HTTPS
+
+- Terminate TLS at the load balancer or reverse proxy; set session cookie `secure` when appropriate.
 
 ---
 
-## 12. API / Route Reference
+## 12. Troubleshooting
 
-### Full Route Table
+| Symptom | What to check |
+|---------|----------------|
+| All routes 404 | `mod_rewrite`, `AllowOverride`, document root points to `hostelease` |
+| Redirects go to `localhost` on Render | `APP_ENV=production`; remove or fix `BASE_URL`; redeploy |
+| Database connection failed | `DB_PASS`, host/port, firewall, `DB_SSL=true` for Aiven |
+| `sslmode` / SSL errors | `DB_SSL=true` in `.env`; provider CA if you verify certs strictly |
+| CSRF / session issues | Same-site cookies, `BASE_URL` consistency, clock skew |
+| Payroll menu empty | Run `migrate_payroll.php`; ensure `staff_details` rows exist |
+| Upload failures | `upload_max_filesize`, `post_max_size`, directory permissions |
 
-| Method | URL Pattern                | Controller           | Action          | Access              |
-|:-------|:---------------------------|:---------------------|:----------------|:--------------------|
-| GET    | `auth/login`               | AuthController       | login           | Public              |
-| POST   | `auth/login`               | AuthController       | login           | Public              |
-| GET    | `auth/logout`              | AuthController       | logout          | Authenticated       |
-| GET    | `auth/forgot-password`     | AuthController       | forgotPassword  | Public              |
-| POST   | `auth/forgot-password`     | AuthController       | forgotPassword  | Public              |
-| GET    | `dashboard/index`          | AdminController      | dashboard       | Admin, Super Admin  |
-| GET    | `dashboard/student`        | AdminController      | student         | Student             |
-| GET    | `dashboard/staff`          | AdminController      | staff           | Staff               |
-| GET    | `dashboard/profile`        | AdminController      | profile         | Authenticated       |
-| GET    | `students/index`           | StudentController    | index           | Admin, Super Admin  |
-| GET    | `students/create`          | StudentController    | create          | Admin, Super Admin  |
-| POST   | `students/store`           | StudentController    | store           | Admin, Super Admin  |
-| GET    | `students/show/{id}`       | StudentController    | show            | Admin, Student (own)|
-| GET    | `students/edit/{id}`       | StudentController    | edit            | Admin, Super Admin  |
-| POST   | `students/update/{id}`     | StudentController    | update          | Admin, Super Admin  |
-| POST   | `students/delete/{id}`     | StudentController    | delete          | Admin, Super Admin  |
-| GET    | `rooms/index`              | RoomController       | index           | Admin, Super Admin  |
-| GET    | `rooms/create`             | RoomController       | create          | Admin, Super Admin  |
-| POST   | `rooms/store`              | RoomController       | store           | Admin, Super Admin  |
-| GET    | `rooms/edit/{id}`          | RoomController       | edit            | Admin, Super Admin  |
-| POST   | `rooms/update/{id}`        | RoomController       | update          | Admin, Super Admin  |
-| GET    | `allocations/allocate`     | AllocationController | allocate        | Admin, Super Admin  |
-| POST   | `allocations/allocate`     | AllocationController | allocate        | Admin, Super Admin  |
-| GET    | `allocations/transfer`     | AllocationController | transfer        | Admin, Super Admin  |
-| POST   | `allocations/transfer`     | AllocationController | transfer        | Admin, Super Admin  |
-| POST   | `allocations/vacate`       | AllocationController | vacate          | Admin, Super Admin  |
-| GET    | `payments/index`           | PaymentController    | index           | Admin, Super Admin  |
-| GET    | `payments/record`          | PaymentController    | record          | Admin, Super Admin  |
-| POST   | `payments/store`           | PaymentController    | store           | Admin, Super Admin  |
-| GET    | `payments/receiptView/{id}`| PaymentController    | receiptView     | Authenticated       |
-| GET    | `complaints/index`         | ComplaintController   | index           | All Authenticated   |
-| GET    | `complaints/create`        | ComplaintController   | create          | All Authenticated   |
-| POST   | `complaints/store`         | ComplaintController   | store           | All Authenticated   |
-| GET    | `complaints/show/{id}`     | ComplaintController   | show            | All Authenticated   |
-| POST   | `complaints/update/{id}`   | ComplaintController   | update          | Admin, Staff        |
-| POST   | `complaints/assign/{id}`   | ComplaintController   | assign          | Admin, Super Admin  |
-| GET    | `notices/index`            | NoticeController     | index           | All Authenticated   |
-| GET    | `notices/create`           | NoticeController     | create          | Admin, Super Admin  |
-| POST   | `notices/store`            | NoticeController     | store           | Admin, Super Admin  |
-| GET    | `notices/edit/{id}`        | NoticeController     | edit            | Admin, Super Admin  |
-| POST   | `notices/update/{id}`      | NoticeController     | update          | Admin, Super Admin  |
-| POST   | `notices/delete/{id}`      | NoticeController     | delete          | Admin, Super Admin  |
-| GET    | `audit/index`              | AuditController      | index           | Super Admin         |
+### Development debugging
+
+- Temporarily set `APP_ENV=development` for clearer DB error messages (still avoid enabling `display_errors` in shared hosting).
 
 ---
 
-*End of Technical Documentation*
+## 13. Route reference
+
+Below, **access** is abbreviated: SA = super_admin, A = admin, St = student, T = staff.
+
+| `url` (path after `?url=`) | Controller | Action | Access |
+|----------------------------|------------|--------|--------|
+| *(empty)* | Landing | index | Public |
+| `auth/login`, `auth/logout` | Auth | login, logout | Public / auth |
+| `auth/forgot-password` | Auth | forgotPassword | Public |
+| `dashboard/index` | Admin | dashboard | SA, A |
+| `dashboard/student` | Admin | student | St |
+| `dashboard/staff` | Admin | staff | T |
+| `students/*` | Student | * | SA, A (and student for own where implemented) |
+| `students/editSelf` | Student | editSelf | St |
+| `rooms/*` | Room | * | SA, A |
+| `allocations/*` | Allocation | * | SA, A |
+| `payments/index` | Payment | index | SA, A, St, T |
+| `payments/record`, `payments/store` | Payment | record, store | A |
+| `payments/makePayment`, `payments/processPortal` | Payment | makePayment, processPortal | St, A, T (not SA) |
+| `payments/receiptView/{id}` | Payment | receiptView | SA, A, St, T |
+| `complaints/*` | Complaint | * | Role-dependent |
+| `notices/*` | Notice | * | SA, A (writes); read for others |
+| `audit/index` | Audit | index | SA |
+| `users/*` | User | * | SA |
+| `profile/index`, `profile/edit` | Profile | index, edit | Authenticated |
+| `payroll/index`, `payroll/apply` | Payroll | index, apply | T, A |
+| `payroll/review`, `payroll/processApproval` | Payroll | review, processApproval | SA, A |
+| `payroll/distribute`, `payroll/pay` | Payroll | distribute, pay | SA |
+| `finances/index` | Finance | index | SA |
+
+*Note:* Exact method names may vary; use `grep` in `app/controllers/` for the canonical list.
+
+---
+
+*End of technical documentation.*
