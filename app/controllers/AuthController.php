@@ -57,8 +57,9 @@ class AuthController
                     $errors[] = 'Please fill in all fields.';
                 } else {
                     // Check if it's super admin from config
-                    if ($email === SUPER_ADMIN_EMAIL && $submittedRole === 'super_admin') {
-                        if (password_verify($password, SUPER_ADMIN_PASS)) {
+                    $saHash = defined('SUPER_ADMIN_PASS_HASH') ? (string)SUPER_ADMIN_PASS_HASH : '';
+                    if ($email === SUPER_ADMIN_EMAIL && $submittedRole === 'super_admin' && !empty($saHash)) {
+                        if (password_verify($password, $saHash)) {
                             // Virtual login for SA config fallback
                             $_SESSION['user_id'] = 0;
                             $_SESSION['user_role'] = 'super_admin';
