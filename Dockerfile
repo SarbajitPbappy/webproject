@@ -1,8 +1,11 @@
 FROM php:8.2-apache
 
-# Hard-disable conflicting MPM modules to fix "More than one MPM loaded"
-RUN rm -f /etc/apache2/mods-enabled/mpm_event.load /etc/apache2/mods-enabled/mpm_event.conf && \
-    rm -f /etc/apache2/mods-enabled/mpm_worker.load /etc/apache2/mods-enabled/mpm_worker.conf && \
+# Comprehensive MPM Cleanup ("Scorched Earth")
+# This script finds every file in /etc/apache2 and ensures no mpm_ module is loaded as a LoadModule directive
+# before we explicitly enable mpm_prefork.
+RUN find /etc/apache2 -type f -name "*.load" -o -name "*.conf" -o -name "apache2.conf" | \
+    xargs sed -i 's/^LoadModule mpm_/# LoadModule mpm_/g' && \
+    a2dismod mpm_event mpm_worker || true && \
     a2enmod mpm_prefork || true
 
 # Enable URL rewriting for .htaccess routing
@@ -19,4 +22,7 @@ RUN mkdir -p /var/www/html/public/uploads/students /var/www/html/public/uploads/
     chown -R www-data:www-data /var/www/html/public/uploads
 
 EXPOSE 80
+
+# Start Apache in the foreground
+CMD ["apache2-foreground"]
 
