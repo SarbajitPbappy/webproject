@@ -67,6 +67,38 @@ function loadEnvFile(string $path): void
 
 loadEnvFile(APP_ROOT . '/.env');
 
+/**
+ * Parse a mysql:// or mysql2:// URL (e.g. Railway DATABASE_URL / Connect string).
+ *
+ * @return array{host:string,port:?string,user:?string,pass:?string,database:?string}|null
+ */
+function hostelease_parse_mysql_connection_url(string $raw): ?array
+{
+    $raw = trim($raw);
+    if ($raw === '' || !preg_match('#^mysql2?://#i', $raw)) {
+        return null;
+    }
+
+    $parts = parse_url($raw);
+    if ($parts === false || empty($parts['host'])) {
+        return null;
+    }
+
+    $path = $parts['path'] ?? '';
+    $database = null;
+    if ($path !== '' && $path !== '/') {
+        $database = rawurldecode(ltrim($path, '/'));
+    }
+
+    return [
+        'host'     => $parts['host'],
+        'port'     => isset($parts['port']) ? (string) (int) $parts['port'] : null,
+        'user'     => isset($parts['user']) ? rawurldecode($parts['user']) : null,
+        'pass'     => array_key_exists('pass', $parts) && $parts['pass'] !== null ? rawurldecode((string) $parts['pass']) : null,
+        'database' => $database,
+    ];
+}
+
 // ─── Application Settings ───────────────────────────────────────────
 define('APP_NAME', 'HostelEase');
 define('APP_VERSION', '1.0.0');
@@ -91,13 +123,75 @@ if (!empty($baseUrlEnv) && !(APP_ENV !== 'development' && $isLocalhostBase)) {
 define('BASE_URL', $computedBaseUrl);
 
 // ─── Database Configuration ─────────────────────────────────────────
-define('DB_HOST', getenv('DB_HOST') ?: 'hostelease-hostelease.a.aivencloud.com');
-define('DB_PORT', getenv('DB_PORT') ?: '19887');
-define('DB_NAME', getenv('DB_NAME') ?: 'defaultdb');
-define('DB_USER', getenv('DB_USER') ?: 'avnadmin');
-// IMPORTANT: do not commit real DB passwords into git.
-// In Render, set DB_PASS in Environment variables.
-define('DB_PASS', getenv('DB_PASS') ?: '');
+// CLI on your laptop: internal Railway hostnames do not resolve. Use either:
+// - DB_PUBLIC_HOST=junction.proxy.rlwy.net (+ DB_PUBLIC_PORT), or
+// - Paste the full mysql://… URL from Railway → MySQL → Connect into DB_PUBLIC_HOST, or
+// - Rely on DATABASE_URL / MYSQL_URL when `railway run` injects them.
+// Web (Apache) is not CLI, so it keeps using DB_HOST / DB_PORT / DB_* from env.
+$isCli = PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg';
+
+$dbHost = getenv('DB_HOST') ?: 'junction.proxy.rlwy.net';
+$dbPort = getenv('DB_PORT') ?: '33279';
+$dbName = getenv('DB_NAME') ?: 'railway';
+$dbUser = getenv('DB_USER') ?: 'root';
+$dbPass = getenv('DB_PASS') ?: '';
+
+if ($isCli) {
+    $parsed = null;
+    $urlCandidates = [
+        getenv('DB_PUBLIC_HOST'),
+        getenv('MYSQL_PUBLIC_URL'),
+        getenv('DATABASE_PUBLIC_URL'),
+        getenv('DATABASE_URL'),
+        getenv('MYSQL_URL'),
+    ];
+    foreach ($urlCandidates as $candidate) {
+        if ($candidate === false || $candidate === '') {
+            continue;
+        }
+        $p = hostelease_parse_mysql_connection_url($candidate);
+        if ($p === null) {
+            continue;
+        }
+        // `railway run` may inject internal URLs; those do not resolve on your laptop.
+        if (str_ends_with($p['host'], '.railway.internal')) {
+            continue;
+        }
+        $parsed = $p;
+        break;
+    }
+
+    if ($parsed !== null) {
+        $dbHost = $parsed['host'];
+        if ($parsed['port'] !== null) {
+            $dbPort = $parsed['port'];
+        }
+        if ($parsed['database'] !== null) {
+            $dbName = $parsed['database'];
+        }
+        if ($parsed['user'] !== null) {
+            $dbUser = $parsed['user'];
+        }
+        if ($parsed['pass'] !== null) {
+            $dbPass = $parsed['pass'];
+        }
+    } else {
+        $publicHost = getenv('DB_PUBLIC_HOST');
+        if ($publicHost !== false && $publicHost !== '') {
+            $dbHost = $publicHost;
+            $publicPort = getenv('DB_PUBLIC_PORT');
+            if ($publicPort !== false && $publicPort !== '') {
+                $dbPort = $publicPort;
+            }
+        }
+    }
+}
+
+define('DB_HOST', $dbHost);
+define('DB_PORT', $dbPort);
+define('DB_NAME', $dbName);
+define('DB_USER', $dbUser);
+define('DB_PASS', $dbPass);
 define('DB_CHARSET', 'utf8mb4');
 // Default to false for local dev; set true in Render if your DB requires SSL.
 define('DB_SSL', filter_var(getenv('DB_SSL') ?: 'false', FILTER_VALIDATE_BOOLEAN));

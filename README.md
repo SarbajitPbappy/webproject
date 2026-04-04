@@ -125,11 +125,21 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for full behavior of `BASE_URL` and pro
 
 1. **Import schema** (from the `hostelease` directory):
 
+   Use `--password=` or `-p` **immediately** followed by the password (no space). Otherwise `mysql` mis-parses arguments and prints help.
+
    ```bash
-   mysql -h YOUR_HOST -P YOUR_PORT -u YOUR_USER -p YOUR_DATABASE < database/hostelease.sql
+   mysql -h YOUR_HOST -P YOUR_PORT -u YOUR_USER --password="YOUR_PASSWORD" YOUR_DATABASE < database/hostelease.sql
    ```
 
-2. **Seed the Super Admin** (once):
+   Or run both schema import and super-admin seed (same `DB_*` variables as `config/config.php`):
+
+   ```bash
+   ./database/bootstrap_from_cli.sh all
+   ```
+
+   **Railway from your laptop:** use the **public** TCP proxy host from the MySQL service (Variables / Connect). The hostname `mysql.railway.internal` only resolves **inside** Railway, not on your Mac.
+
+2. **Seed the Super Admin** (once), if you did not use `bootstrap_from_cli.sh all`:
 
    ```bash
    php database/seeds/admin_seed.php
