@@ -101,6 +101,25 @@
                     <input type="file" class="form-control" id="nid_or_card" name="nid_or_card" accept=".jpg,.jpeg,.png,.pdf">
                     <small class="text-muted">Max 5MB. JPG, PNG, or PDF.</small>
                 </div>
+
+                <?php
+                $vacancy = $vacancyByType ?? ['single' => 0, 'double' => 0, 'triple' => 0, 'dormitory' => 0];
+                $prt = $data['preferred_room_type'] ?? '';
+                ?>
+                <div class="col-12 mt-4">
+                    <h5 class="section-title"><i class="bi bi-door-open me-2"></i>Enrollment waitlist (optional)</h5>
+                    <p class="text-muted small">If set, the student is queued with this room tier so <strong>Issue enrollment billing</strong> can create the matching room-rent slip before allocation.</p>
+                </div>
+                <div class="col-md-6">
+                    <label for="preferred_room_type" class="form-label">Preferred room tier</label>
+                    <select class="form-select" id="preferred_room_type" name="preferred_room_type">
+                        <option value="">— Not on waitlist —</option>
+                        <option value="single" <?php echo $prt === 'single' ? 'selected' : ''; ?>>Single (<?php echo (int) $vacancy['single']; ?> beds free)</option>
+                        <option value="double" <?php echo $prt === 'double' ? 'selected' : ''; ?>>Double (<?php echo (int) $vacancy['double']; ?> beds free)</option>
+                        <option value="triple" <?php echo $prt === 'triple' ? 'selected' : ''; ?>>Triple (<?php echo (int) $vacancy['triple']; ?> beds free)</option>
+                        <option value="dormitory" <?php echo $prt === 'dormitory' ? 'selected' : ''; ?>>Dormitory (<?php echo (int) $vacancy['dormitory']; ?> beds free)</option>
+                    </select>
+                </div>
             </div>
 
             <hr class="my-4">

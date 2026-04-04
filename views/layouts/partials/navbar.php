@@ -5,6 +5,7 @@
 $user = currentUser();
 $role = $user['role'] ?? '';
 $pendingPaySlipCount = 0;
+$unreadUserNotifs = 0;
 
 // Show notification badge to Super Admin when new payroll slips are created (status='applied').
 if ($role === 'super_admin') {
@@ -15,7 +16,18 @@ if ($role === 'super_admin') {
     } catch (Exception $e) {
         $pendingPaySlipCount = 0; // Never break navbar rendering.
     }
+} else {
+    $uid = (int) ($user['id'] ?? 0);
+    if ($uid > 0) {
+        require_once APP_ROOT . '/app/models/UserNotification.php';
+        $unreadUserNotifs = UserNotification::unreadCountForUser($uid);
+    }
 }
+
+$bellCount = $role === 'super_admin' ? $pendingPaySlipCount : $unreadUserNotifs;
+$bellHref = $role === 'super_admin'
+    ? BASE_URL . '?url=payroll/review'
+    : BASE_URL . '?url=notifications/index';
 ?>
 <header class="top-navbar">
     <div class="navbar-left">
@@ -36,13 +48,13 @@ if ($role === 'super_admin') {
             </div>
         </div>
 
-        <!-- Notifications placeholder -->
-        <div class="navbar-icon-btn" title="Notifications">
+        <!-- Payroll (super admin) or in-app alerts -->
+        <a href="<?php echo e($bellHref); ?>" class="navbar-icon-btn text-decoration-none text-body" title="<?php echo $role === 'super_admin' ? 'Payroll review' : 'Notifications'; ?>">
             <i class="bi bi-bell"></i>
-            <span class="notification-badge" id="notifBadge" style="<?php echo $pendingPaySlipCount > 0 ? 'display:flex;' : 'display:none;'; ?>">
-                <?php echo (int)$pendingPaySlipCount; ?>
+            <span class="notification-badge" id="notifBadge" style="<?php echo $bellCount > 0 ? 'display:flex;' : 'display:none;'; ?>">
+                <?php echo (int) $bellCount; ?>
             </span>
-        </div>
+        </a>
 
         <!-- User Dropdown -->
         <div class="dropdown">

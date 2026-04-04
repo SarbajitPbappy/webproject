@@ -3,8 +3,8 @@
 <div class="content-header">
     <h2 class="mb-1">Issue enrollment billing</h2>
     <p class="text-muted mb-0">
-        For new students: issue <strong>security deposit</strong> and the correct <strong>room rent tier</strong> (single / double / triple / dormitory).
-        Paying the room rent slip sets which room types they may be allocated to.
+        Issue <strong>security deposit</strong> and tick <strong>all four</strong> room-rent tiers if you like—only the slip that fits this student is created:
+        <strong>allocated residents</strong> use their current room type; <strong>new applicants</strong> use the room tier they chose at registration (waitlist). They pay online, then you allocate a matching room.
     </p>
 </div>
 
@@ -24,6 +24,11 @@
                     <?php foreach ($students as $s): ?>
                     <option value="<?php echo (int) $s['id']; ?>" <?php echo (int) ($_POST['student_id'] ?? 0) === (int) $s['id'] ? 'selected' : ''; ?>>
                         <?php echo e($s['full_name']); ?> (<?php echo e($s['student_id_no']); ?>)
+                        <?php if (!empty($s['waitlist_preferred_room_type'])): ?>
+                        — prefers <?php echo e($s['waitlist_preferred_room_type']); ?>
+                        <?php elseif (!empty($s['entitled_room_type'])): ?>
+                        — paid tier <?php echo e($s['entitled_room_type']); ?>
+                        <?php endif; ?>
                     </option>
                     <?php endforeach; ?>
                 </select>

@@ -19,7 +19,37 @@
                     <div class="col-6"><label class="detail-label">Since</label><p class="detail-value"><?php echo date('M d, Y', strtotime($allocation['start_date'])); ?></p></div>
                 </div>
                 <?php else: ?>
-                <div class="text-center text-muted py-3"><i class="bi bi-house-x display-4 d-block mb-2"></i>No room allocated yet.</div>
+                <div class="text-center text-muted py-3">
+                    <i class="bi bi-house-x display-4 d-block mb-2"></i>No room allocated yet.
+                    <p class="small mb-0 mt-2">Wrong room type at signup? <a href="<?php echo BASE_URL; ?>?url=students/editSelf">Update your waitlist preference</a> or use <a href="<?php echo BASE_URL; ?>?url=profile/edit">Edit profile</a>.</p>
+                </div>
+                <?php endif; ?>
+                <?php if (!empty($latestRoomRequest)): ?>
+                <?php
+                $lr = $latestRoomRequest;
+                $lrLabel = $lr['request_type'] === 'room_cancellation' ? 'Cancellation' : 'Room change';
+                $lrBadge = match ($lr['status']) {
+                    'pending' => 'warning',
+                    'approved' => 'info',
+                    'completed' => 'success',
+                    'rejected' => 'danger',
+                    default => 'secondary',
+                };
+                ?>
+                <hr class="my-3">
+                <p class="small text-muted mb-1">Latest room request</p>
+                <p class="mb-1"><strong><?php echo e($lrLabel); ?></strong>
+                    <span class="badge bg-<?php echo e($lrBadge); ?>-subtle text-<?php echo e($lrBadge); ?>"><?php echo e($lr['status']); ?></span>
+                </p>
+                <?php if (!empty($lr['admin_notes'])): ?>
+                <p class="small mb-0 text-body-secondary"><?php echo e($lr['admin_notes']); ?></p>
+                <?php endif; ?>
+                <a href="<?php echo BASE_URL; ?>?url=students/roomRequests" class="small">View all requests</a>
+                <?php endif; ?>
+                <?php if (!empty($billingCreditBalance) && $billingCreditBalance > 0.009): ?>
+                <div class="alert alert-success py-2 small mt-3 mb-0">
+                    <strong>Room rent credit:</strong> ৳<?php echo number_format((float) $billingCreditBalance, 2); ?> will reduce your next tier-matched room rent slip when the office issues monthly bills.
+                </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -55,7 +85,10 @@
                 ?>
                 Total <strong>৳<?php echo number_format($t, 2); ?></strong>
             </div>
-            <a href="<?php echo BASE_URL; ?>?url=payments/makePayment" class="btn btn-sm btn-dark">Pay now</a>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="<?php echo BASE_URL; ?>?url=payments/makePayment" class="btn btn-sm btn-dark">Pay now</a>
+                <a href="<?php echo BASE_URL; ?>?url=payments/balanceSheet" class="btn btn-sm btn-outline-secondary">Balance sheet</a>
+            </div>
         </div>
     </div>
     <?php endif; ?>

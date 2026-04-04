@@ -5,11 +5,17 @@
 ?>
 
 <div class="content-header">
-    <div class="d-flex justify-content-between align-items-center">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <h2 class="mb-1">Student Profile</h2>
             <p class="text-muted mb-0"><?php echo e($student['full_name']); ?></p>
-
+        </div>
+        <?php if (hasRole(['student'])): ?>
+        <div class="d-flex gap-2">
+            <a href="<?php echo BASE_URL; ?>?url=profile/edit" class="btn btn-outline-primary btn-sm">Quick edit</a>
+            <a href="<?php echo BASE_URL; ?>?url=students/editSelf" class="btn btn-primary-gradient btn-sm">Edit profile &amp; room preference</a>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -58,6 +64,16 @@
                         <label class="detail-label">Checkout Date</label>
                         <p class="detail-value"><?php echo $student['checkout_date'] ? date('F d, Y', strtotime($student['checkout_date'])) : 'Still Enrolled'; ?></p>
                     </div>
+                    <?php if (empty($studentActiveAllocation) && !empty($studentWaitlistRoomPref)): ?>
+                    <div class="col-sm-6">
+                        <label class="detail-label">Waitlist room preference</label>
+                        <p class="detail-value"><?php echo ucfirst(e($studentWaitlistRoomPref)); ?> <?php if (hasRole(['student'])): ?><a href="<?php echo BASE_URL; ?>?url=students/editSelf" class="small">Change</a><?php endif; ?></p>
+                    </div>
+                    <?php elseif (empty($studentActiveAllocation) && hasRole(['student'])): ?>
+                    <div class="col-12">
+                        <p class="text-muted small mb-0">No room preference on file. <a href="<?php echo BASE_URL; ?>?url=students/editSelf">Set your preferred room type</a> before enrollment billing.</p>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

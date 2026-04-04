@@ -2,7 +2,7 @@
 
 <div class="content-header">
     <div class="d-flex justify-content-between align-items-center">
-        <div><h2 class="mb-1">Transfer Student</h2><p class="text-muted mb-0">Move a student to a different room</p></div>
+        <div><h2 class="mb-1">Transfer Student</h2><p class="text-muted mb-0">Move a resident to a different room</p></div>
         <a href="<?php echo BASE_URL; ?>?url=allocations/allocate" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a>
     </div>
 </div>
@@ -44,6 +44,48 @@
                     <label for="notes" class="form-label">Notes</label>
                     <textarea class="form-control" id="notes" name="notes" rows="2" placeholder="Reason for transfer..."></textarea>
                 </div>
+
+                <?php if (!empty($transferFee)): ?>
+                <div class="col-12">
+                    <div class="border rounded p-3 bg-body-secondary bg-opacity-25">
+                        <h6 class="mb-2"><i class="bi bi-receipt me-1"></i>Transfer fee (<?php echo e($transferFee['name']); ?>)</h6>
+                        <p class="small text-muted mb-3">Amount: <strong>৳<?php echo number_format((float) $transferFee['amount'], 2); ?></strong>. Choose how to handle it before completing the move.</p>
+                        <div class="d-flex flex-column gap-2">
+                            <label class="d-flex gap-2 align-items-start mb-0">
+                                <input type="radio" name="transfer_fee_action" value="slip" class="mt-1" checked>
+                                <span><strong>Add fee to student portal</strong> — they can pay online later; you can also record cash/bank from Payments.</span>
+                            </label>
+                            <label class="d-flex gap-2 align-items-start mb-0">
+                                <input type="radio" name="transfer_fee_action" value="slip_pay" class="mt-1">
+                                <span><strong>Portal slip + record offline payment now</strong> (cash/bank).</span>
+                            </label>
+                            <label class="d-flex gap-2 align-items-start mb-0">
+                                <input type="radio" name="transfer_fee_action" value="pay_only" class="mt-1">
+                                <span><strong>Record offline payment only</strong> — no new slip on the portal.</span>
+                            </label>
+                            <?php if (!empty($isSuperAdmin)): ?>
+                            <label class="d-flex gap-2 align-items-start mb-0">
+                                <input type="radio" name="transfer_fee_action" value="waive" class="mt-1">
+                                <span><strong>Waive fee</strong> (super admin only).</span>
+                            </label>
+                            <?php endif; ?>
+                        </div>
+                        <div class="row g-2 mt-3" id="transferPayFields">
+                            <div class="col-md-4">
+                                <label class="form-label small mb-0" for="payment_method">Payment method</label>
+                                <select class="form-select form-select-sm" id="payment_method" name="payment_method">
+                                    <option value="cash">Cash</option>
+                                    <option value="bank">Bank</option>
+                                </select>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label small mb-0" for="payment_reference">Reference (optional)</label>
+                                <input type="text" class="form-control form-control-sm" id="payment_reference" name="payment_reference" placeholder="Txn ID, receipt no.">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
             </div>
             <hr class="my-4">
             <div class="d-flex justify-content-end gap-2">
@@ -69,5 +111,18 @@
   }
   if (st) st.addEventListener('change', filterRooms);
   filterRooms();
+
+  const payWrap = document.getElementById('transferPayFields');
+  if (payWrap) {
+    function syncPayFields() {
+      const checked = document.querySelector('input[name="transfer_fee_action"]:checked');
+      const v = checked ? checked.value : 'slip';
+      payWrap.style.display = (v === 'slip_pay' || v === 'pay_only') ? '' : 'none';
+    }
+    document.querySelectorAll('input[name="transfer_fee_action"]').forEach(function(r) {
+      r.addEventListener('change', syncPayFields);
+    });
+    syncPayFields();
+  }
 })();
 </script>

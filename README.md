@@ -1,6 +1,6 @@
 # HostelEase — Web-Based Hostel Management System
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![PHP](https://img.shields.io/badge/PHP-8.2+-purple)
 ![MySQL](https://img.shields.io/badge/MySQL-8.x-orange)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-blueviolet)
@@ -23,6 +23,7 @@ For **architecture, security details, environment variables, and troubleshooting
 - [Docker](#docker)
 - [Deploy on Render](#deploy-on-render)
 - [Default credentials](#default-credentials)
+- [Demo accounts (full dataset)](#demo-accounts-full-dataset)
 - [User roles](#user-roles)
 - [Project structure](#project-structure)
 - [Security highlights](#security-highlights)
@@ -41,7 +42,9 @@ For **architecture, security details, environment variables, and troubleshooting
 - **Students** — CRUD, photos and documents, search; default password when none is set at creation.
 - **Rooms & allocations** — Inventory, capacity, allocate / transfer / vacate, waitlist.
 - **Automation** — When a student vacates and a room has capacity, the next waitlisted student can be allocated automatically (see [DOCUMENTATION.md](DOCUMENTATION.md)).
-- **Payments** — Fee structures, manual recording (admin), online portal (students and staff/admin **with a linked student profile**), receipts.
+- **Payments** — Fee structures, manual recording (admin), online portal (students and staff/admin **with a linked student profile**), **pay all slips in one checkout**, **advance prepay** for a billing month before slips exist, **fee balance sheet**, receipts.
+- **Billing intelligence** — Monthly issue matches room rent to allocation tier; **skips or reduces** lines when the student **already prepaid** that fee/month; **yearly fees** (e.g. **annual maintenance**) use **one charge per calendar year**: fully paid in-year → no new slip; partially paid → slip for the **balance** only.
+- **Room lifecycle** — Waitlist-only **new allocation**; **transfer** with optional transfer fee; **student room change / cancellation requests** with admin queue; **auto room move** on approved change when a bed exists; **billing credits** when changing room tier.
 - **Payroll** — Staff apply for monthly slips; admin review/approval; **super admin** distributes salary and records expenses in the ledger.
 - **Super Admin notifications** — Pending payroll items are surfaced in the navbar/sidebar (badge/dot).
 - **Complaints** — Ticketing, assignment, SLA (high 24h / medium 72h).
@@ -132,13 +135,44 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for full behavior of `BASE_URL` and pro
    php database/seeds/admin_seed.php
    ```
 
-3. **Payroll & finance tables** (if you use payroll/finance features):
+3. **Payroll tables** (if you use **My payroll** / pay slips — safe for existing data):
 
    ```bash
-   php database/migrations/migrate_payroll.php
+   php database/migrations/migrate_payroll_tables_safe.php
    ```
 
-If `transactions` already exists from `hostelease.sql`, the migration uses `CREATE TABLE IF NOT EXISTS` and aligns with the ledger schema.
+   This creates `staff_details` and `pay_slips` if missing and adds default rows for staff/warden users. The older `migrate_payroll.php` also repopulates `transactions` from payments and **truncates** some tables — use only if you intend that reset.
+
+4. **Optional** (run if your database was created before these features):
+
+   ```bash
+   php database/migrations/migrate_user_notifications.php
+   php database/migrations/migrate_room_requests_transfer_fee.php
+   php database/migrations/migrate_student_billing_credit.php
+   php database/migrations/migrate_students_registration_profile.php
+   ```
+
+### Optional: full demo (recommended for presentations)
+
+From the `hostelease` directory, after schema import and `admin_seed.php`:
+
+```bash
+# In-app notifications (billing alerts, etc.)
+php database/migrations/migrate_user_notifications.php
+
+# Student self-registration fields (if your DB predates this column)
+php database/migrations/migrate_students_registration_profile.php
+
+# 2 wardens, 10 staff, 100 students — all @hallportal.demo.bd
+php database/seeds/bangladesh_demo_seed.php
+
+# 10-floor DEMO tower + allocate all 100 students (optional sample billing)
+php database/seeds/demo_hostel_building_allocate.php --force
+# With sample meal/utility slips + notifications for current month:
+# php database/seeds/demo_hostel_building_allocate.php --force --with-billing
+```
+
+Use **[Demo accounts (full dataset)](#demo-accounts-full-dataset)** below for logins. Super Admin remains `admin@hostelease.com` (separate from the demo domain).
 
 ---
 
@@ -210,6 +244,27 @@ Students created by admins without a password use **`Student@123`** by default (
 
 ---
 
+## Demo accounts (full dataset)
+
+These accounts exist after you run **`database/seeds/bangladesh_demo_seed.php`** (see [Database setup](#database-setup)). Every address uses the domain **`@hallportal.demo.bd`** so you can find or delete demo users easily.
+
+| Role | How many | Login email(s) | Password |
+|------|----------|------------------|----------|
+| **Super Admin** | 1 (separate seed) | `admin@hostelease.com` | `Admin@123` |
+| **Warden (admin)** | 2 | `kamrul.hasan.warden@hallportal.demo.bd`<br>`farzana.chowdhury.warden@hallportal.demo.bd` | `Warden@123` |
+| **Staff** | 10 | `staff01@hallportal.demo.bd` through `staff10@hallportal.demo.bd` | `Staff@123` |
+| **Student** | 100 | `stu001.hall@hallportal.demo.bd` … `stu100.hall@hallportal.demo.bd` (three-digit index) | `Student@123` |
+
+**One-demo walkthrough**
+
+1. Log in as a **warden** — manage students, rooms, allocations, issue monthly bills.  
+2. Log in as **`stu001.hall@hallportal.demo.bd`** / `Student@123` — student dashboard, **Pay fees online** (pay all slips in one checkout), notifications when new bills are issued.  
+3. Log in as **Super Admin** — payroll review, finances, users (not the student portal).
+
+After **`demo_hostel_building_allocate.php`**, demo students are placed in **`DEMO-*`** rooms across 10 floors; use **`--with-billing`** to create sample meal/utility slips and in-app notifications for the current month.
+
+---
+
 ## User roles
 
 | Role | Typical use |
@@ -270,7 +325,8 @@ URLs use the query form: `BASE_URL?url=controller/action/id`
 | `dashboard/student`, `dashboard/staff` | Role dashboards |
 | `students/index`, `students/create`, … | Student management |
 | `rooms/index`, `allocations/allocate`, … | Rooms & allocations |
-| `payments/index`, `payments/record`, `payments/makePayment`, … | Payments |
+| `payments/index`, `payments/record`, `payments/makePayment`, `payments/processPrepay`, `payments/balanceSheet`, `payments/processPortalAll`, … | Payments |
+| `allocations/roomRequests`, `students/roomRequests` | Room requests queue & student form |
 | `profile/index`, `profile/edit` | Profile |
 | `users/index`, `users/create` | Users (Super Admin) |
 | `payroll/index`, `payroll/review`, `payroll/distribute` | Payroll |

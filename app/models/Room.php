@@ -246,6 +246,36 @@ class Room
     }
 
     /**
+     * Sum of free beds per room type (non-maintenance rooms; active allocations only).
+     * Used on registration to show vacancy for single/double/triple/dormitory.
+     *
+     * @return array<string,int> keys: single, double, triple, dormitory
+     */
+    public function countOpenBedsByRoomType(): array
+    {
+        $types = ['single', 'double', 'triple', 'dormitory'];
+        $out = array_fill_keys($types, 0);
+        $stmt = $this->db->query(
+            "SELECT r.type,
+                    SUM(GREATEST(0, r.capacity - COALESCE(occ.cnt, 0))) AS open_beds
+             FROM rooms r
+             LEFT JOIN (
+                 SELECT room_id, COUNT(*) AS cnt FROM allocations
+                 WHERE status = 'active' GROUP BY room_id
+             ) occ ON occ.room_id = r.id
+             WHERE r.status != 'maintenance'
+             GROUP BY r.type"
+        );
+        foreach ($stmt->fetchAll() as $row) {
+            $t = (string) $row['type'];
+            if (array_key_exists($t, $out)) {
+                $out[$t] = (int) $row['open_beds'];
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Get distinct floors for filter dropdown.
      */
     public function getFloors(): array

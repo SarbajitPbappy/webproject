@@ -5,6 +5,7 @@
 
 require_once APP_ROOT . '/app/models/User.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
+require_once APP_ROOT . '/app/models/Room.php';
 
 class AuthController
 {
@@ -144,7 +145,19 @@ class AuthController
         }
 
         $errors = [];
-        $data = ['full_name' => '', 'email' => '', 'phone' => ''];
+        $data = [
+            'full_name'             => '',
+            'email'                 => '',
+            'phone'                 => '',
+            'gender'                => '',
+            'course'                => '',
+            'guardian_name'         => '',
+            'guardian_phone'        => '',
+            'preferred_room_type'   => '',
+        ];
+
+        $roomModel = new Room();
+        $vacancyByType = $roomModel->countOpenBedsByRoomType();
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!verifyToken()) {
@@ -157,6 +170,7 @@ class AuthController
                 $data['course']    = sanitize($_POST['course'] ?? '');
                 $data['guardian_name']  = sanitize($_POST['guardian_name'] ?? '');
                 $data['guardian_phone'] = sanitizePhone($_POST['guardian_phone'] ?? '');
+                $data['preferred_room_type'] = sanitize($_POST['preferred_room_type'] ?? '');
                 $password          = $_POST['password'] ?? '';
                 $confirmPassword   = $_POST['confirm_password'] ?? '';
 
@@ -167,6 +181,13 @@ class AuthController
                 if (empty($data['phone'])) $errors[] = 'Phone number is required.';
                 if (empty($data['gender'])) $errors[] = 'Gender selection is required.';
                 if (empty($data['course'])) $errors[] = 'Course name is required.';
+                if (empty($data['guardian_name'])) $errors[] = 'Guardian name is required.';
+                if (empty($data['guardian_phone'])) $errors[] = 'Guardian phone is required.';
+
+                $allowedRoomTiers = ['single', 'double', 'triple', 'dormitory'];
+                if (!in_array($data['preferred_room_type'], $allowedRoomTiers, true)) {
+                    $errors[] = 'Please select your preferred room type (single, double, triple, or dormitory).';
+                }
 
                 if (empty($errors)) {
                     if ($this->userModel->findByEmail($data['email'])) {
@@ -203,14 +224,21 @@ class AuthController
                             $studentId = $db->lastInsertId();
 
                             $db->query(
-                                "INSERT INTO waitlist (student_id, status) VALUES (:sid, 'waiting')",
-                                [':sid' => $studentId]
+                                'INSERT INTO waitlist (student_id, preferred_room_type, status) VALUES (:sid, :prt, :st)',
+                                [
+                                    ':sid' => $studentId,
+                                    ':prt' => $data['preferred_room_type'],
+                                    ':st'  => 'waiting',
+                                ]
                             );
 
                             $db->commit();
 
-                            AuditLog::log($userId, 'REGISTER', 'users', $userId, 'Student self-registered and placed in waitlist');
-                            setFlash('success', 'Registration successful! You have been placed in the room allocation waitlist. You may now log in.');
+                            AuditLog::log($userId, 'REGISTER', 'users', $userId, 'Student self-registered; waitlist tier ' . $data['preferred_room_type']);
+                            setFlash(
+                                'success',
+                                'Registration successful! You are on the waitlist for a ' . $data['preferred_room_type'] . ' room. After the office issues enrollment fees, pay online—then a room can be allocated. You may now log in.'
+                            );
                             header('Location: ' . BASE_URL . '?url=auth/loginAs/student');
                             exit;
                         } catch (Exception $e) {

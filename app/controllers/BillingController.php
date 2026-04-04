@@ -6,13 +6,16 @@
 require_once APP_ROOT . '/app/models/BillingCharge.php';
 require_once APP_ROOT . '/app/models/Payment.php';
 require_once APP_ROOT . '/app/models/Student.php';
+require_once APP_ROOT . '/app/models/Allocation.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
+require_once APP_ROOT . '/app/models/UserNotification.php';
 
 class BillingController
 {
     private BillingCharge $billingModel;
     private Payment $paymentModel;
     private Student $studentModel;
+    private Allocation $allocationModel;
 
     public function __construct()
     {
@@ -23,6 +26,7 @@ class BillingController
         $this->billingModel = new BillingCharge();
         $this->paymentModel = new Payment();
         $this->studentModel = new Student();
+        $this->allocationModel = new Allocation();
     }
 
     /**
@@ -60,15 +64,31 @@ class BillingController
                 }
 
                 if (empty($errors)) {
-                    $n = $this->billingModel->issueBulk($studentIds, $periodMonth, $feeIds, (int) $_SESSION['user_id']);
+                    $result = $this->billingModel->issueBulk($studentIds, $periodMonth, $feeIds, (int) $_SESSION['user_id']);
+                    $n = $result['created'];
+                    $skippedPre = (int) ($result['skipped_prepaid'] ?? 0);
+                    $skippedYearly = (int) ($result['skipped_yearly_paid'] ?? 0);
+                    if (!empty($result['notified_student_ids'])) {
+                        UserNotification::notifyBillingIssued($result['notified_student_ids'], $periodMonth);
+                    }
                     AuditLog::log(
                         (int) $_SESSION['user_id'],
                         'CREATE',
                         'billing_charges',
                         null,
-                        "Issued {$n} billing line(s) for {$periodMonth}"
+                        "Issued {$n} billing line(s) for {$periodMonth} (room rent matched to allocation tier)"
                     );
-                    setFlash('success', "Issued {$n} new billing line(s) for {$periodMonth}. Duplicates for the same student/fee/month were skipped.");
+                    $msg = $n > 0
+                        ? "Issued {$n} new billing line(s) for {$periodMonth}. Room rent was applied by allocated room type only. Affected students were notified."
+                        : 'No new slips were created (everyone may already have these charges for that month, or no students matched tiered rent rules).';
+                    if ($skippedPre > 0) {
+                        $msg .= " {$skippedPre} fee line(s) skipped — students already prepaid that fee for {$periodMonth}.";
+                    }
+                    if ($skippedYearly > 0) {
+                        $calY = substr($periodMonth, 0, 4);
+                        $msg .= " {$skippedYearly} yearly fee line(s) skipped — already paid for calendar year {$calY} (e.g. annual maintenance).";
+                    }
+                    setFlash($n > 0 || $skippedPre > 0 || $skippedYearly > 0 ? 'success' : 'warning', $msg);
                     header('Location: ' . BASE_URL . '?url=billing/issueMonthly');
                     exit;
                 }
@@ -113,7 +133,39 @@ class BillingController
                 }
 
                 if (empty($errors)) {
-                    $n = $this->billingModel->issueBulk([$studentId], $periodMonth, $feeIds, (int) $_SESSION['user_id']);
+                    $needsTieredRent = false;
+                    foreach ($fees as $f) {
+                        if (!in_array((int) $f['id'], $feeIds, true)) {
+                            continue;
+                        }
+                        if (($f['fee_category'] ?? '') === 'room_rent' && !empty($f['maps_room_type'])) {
+                            $needsTieredRent = true;
+                            break;
+                        }
+                    }
+                    if ($needsTieredRent) {
+                        $hasRoom = (bool) $this->allocationModel->findActiveByStudent($studentId);
+                        $pref = $this->allocationModel->waitlistPreferredType($studentId);
+                        if (!$hasRoom && $pref === null) {
+                            $errors[] = 'This student has no active room allocation and no waitlist room preference. Add them to the waitlist with a preferred tier (student self-registration or admin “Register student” with a tier), then issue enrollment billing again.';
+                        }
+                    }
+                }
+
+                if (empty($errors)) {
+                    $result = $this->billingModel->issueBulk(
+                        [$studentId],
+                        $periodMonth,
+                        $feeIds,
+                        (int) $_SESSION['user_id'],
+                        true
+                    );
+                    $n = $result['created'];
+                    $skippedPre = (int) ($result['skipped_prepaid'] ?? 0);
+                    $skippedYearly = (int) ($result['skipped_yearly_paid'] ?? 0);
+                    if (!empty($result['notified_student_ids'])) {
+                        UserNotification::notifyBillingIssued($result['notified_student_ids'], $periodMonth);
+                    }
                     AuditLog::log(
                         (int) $_SESSION['user_id'],
                         'CREATE',
@@ -121,7 +173,17 @@ class BillingController
                         $studentId,
                         "Enrollment billing issued for period {$periodMonth}"
                     );
-                    setFlash('success', "Issued {$n} enrollment billing line(s). Student can pay online or at the office.");
+                    $msg = $n > 0
+                        ? "Issued {$n} enrollment billing line(s). Room rent used the student's current room type if allocated, otherwise their waitlist preference from registration. The student was notified when new slips were added."
+                        : 'No new enrollment slips were created (duplicates for that month, missing waitlist room preference for unallocated students, or room rent tier did not match).';
+                    if ($skippedPre > 0) {
+                        $msg .= " {$skippedPre} line(s) skipped (already prepaid for that period).";
+                    }
+                    if ($skippedYearly > 0) {
+                        $calY = substr($periodMonth, 0, 4);
+                        $msg .= " {$skippedYearly} yearly fee line(s) skipped (already paid for {$calY}).";
+                    }
+                    setFlash($n > 0 || $skippedPre > 0 || $skippedYearly > 0 ? 'success' : 'warning', $msg);
                     header('Location: ' . BASE_URL . '?url=billing/issueEnrollment');
                     exit;
                 }

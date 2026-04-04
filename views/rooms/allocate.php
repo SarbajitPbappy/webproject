@@ -4,7 +4,7 @@
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <h2 class="mb-1">Room Allocations</h2>
-            <p class="text-muted mb-0">Assign students to rooms, manage transfers and vacating</p>
+            <p class="text-muted mb-0">Assign <strong>waitlisted</strong> students to rooms; the table on the right lists <strong>current residents</strong> only.</p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <a href="<?php echo BASE_URL; ?>?url=allocations/occupancy" class="btn btn-outline-secondary">
@@ -25,23 +25,32 @@
     <!-- Allocation Form -->
     <div class="col-lg-5">
         <div class="card card-glass">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>New Allocation</h5></div>
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>New allocation (waitlist only)</h5></div>
             <div class="card-body">
-                <p class="small text-muted mb-3">Students may only be placed in rooms that match their <strong>paid room tier</strong> (set when they pay the correct room rent fee).</p>
+                <p class="small text-muted mb-3">Only students on the <strong>waitlist</strong> who do <strong>not</strong> yet have a room appear here. They may only be placed in rooms that match their <strong>paid tier</strong> or their <strong>waitlist category</strong>.</p>
                 <div id="tierHint" class="alert alert-secondary py-2 small d-none mb-3"></div>
                 <form method="POST" action="<?php echo BASE_URL; ?>?url=allocations/allocate" novalidate>
                     <?php echo csrfField(); ?>
                     <div class="mb-3">
-                        <label for="student_id" class="form-label">Student <span class="text-danger">*</span></label>
+                        <label for="student_id" class="form-label">Waitlisted student <span class="text-danger">*</span></label>
                         <select class="form-select" id="student_id" name="student_id" required>
-                            <option value="" data-tier="">Select Student...</option>
+                            <option value="" data-tier="">Select student...</option>
                             <?php foreach ($students as $s): ?>
-                            <option value="<?php echo $s['id']; ?>" data-tier="<?php echo e($s['entitled_room_type'] ?? ''); ?>">
+                            <?php
+                            $effTier = trim((string) ($s['entitled_room_type'] ?? ''));
+                            if ($effTier === '' && !empty($s['waitlist_preferred_room_type'])) {
+                                $effTier = (string) $s['waitlist_preferred_room_type'];
+                            }
+                            ?>
+                            <option value="<?php echo $s['id']; ?>" data-tier="<?php echo e($effTier); ?>">
                                 <?php echo e($s['full_name']); ?> (<?php echo e($s['student_id_no']); ?>)
-                                <?php if (!empty($s['entitled_room_type'])): ?> — tier <?php echo e($s['entitled_room_type']); ?><?php endif; ?>
+                                <?php if ($effTier !== ''): ?> — <?php echo e($effTier); ?><?php endif; ?>
                             </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php if (empty($students)): ?>
+                        <div class="form-text text-warning">No waitlisted students without a room. Add students to the waitlist first, or use <strong>Transfer</strong> for residents.</div>
+                        <?php endif; ?>
                     </div>
                     <div class="mb-3">
                         <label for="room_id" class="form-label">Room <span class="text-danger">*</span></label>
@@ -98,7 +107,7 @@
     <!-- Current Allocations -->
     <div class="col-lg-7">
         <div class="card card-glass">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Current Allocations</h5></div>
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Current residents</h5></div>
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-hover align-middle" id="allocationsTable">

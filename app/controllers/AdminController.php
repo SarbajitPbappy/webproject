@@ -11,6 +11,7 @@ require_once APP_ROOT . '/app/models/Notice.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
 require_once APP_ROOT . '/app/models/Allocation.php';
 require_once APP_ROOT . '/app/models/BillingCharge.php';
+require_once APP_ROOT . '/app/models/RoomServiceRequest.php';
 
 class AdminController
 {
@@ -101,6 +102,15 @@ class AdminController
         $billingPending = $student ? $billingModel->pendingForStudent((int) $student['id']) : [];
         $complaints = $student ? $complaintModel->findByStudent($student['id']) : [];
         $notices = $noticeModel->getRecent(5);
+
+        $latestRoomRequest = null;
+        if ($student) {
+            $rsr = new RoomServiceRequest();
+            if ($rsr->tableReady()) {
+                $latestRoomRequest = $rsr->latestForStudent((int) $student['id']);
+            }
+        }
+        $billingCreditBalance = $student ? $studentModel->getBillingCreditBalance((int) $student['id']) : 0.0;
 
         $pageTitle = 'My Dashboard';
         ob_start();

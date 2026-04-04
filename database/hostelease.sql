@@ -46,6 +46,8 @@ CREATE TABLE `students` (
   `user_id`         INT UNSIGNED NOT NULL,
   `student_id_no`   VARCHAR(30) NOT NULL,
   `phone`           VARCHAR(20) DEFAULT NULL,
+  `gender`          VARCHAR(32) DEFAULT NULL COMMENT 'Self-registration / profile',
+  `course`          VARCHAR(200) DEFAULT NULL COMMENT 'Course or department',
   `guardian_name`   VARCHAR(100) DEFAULT NULL,
   `guardian_phone`  VARCHAR(20) DEFAULT NULL,
   `nid_or_card`     VARCHAR(255) DEFAULT NULL,
@@ -53,6 +55,8 @@ CREATE TABLE `students` (
   `checkout_date`       DATE DEFAULT NULL,
   `entitled_room_type` ENUM('single','double','triple','dormitory') DEFAULT NULL
     COMMENT 'Room tier paid for; allocation must match',
+  `billing_credit_balance` DECIMAL(10,2) NOT NULL DEFAULT 0
+    COMMENT 'Applied to next room-rent slip after cheaper-room transfer',
   UNIQUE KEY `uk_students_user_id` (`user_id`),
   UNIQUE KEY `uk_students_id_no` (`student_id_no`),
   INDEX `idx_students_enrolled` (`enrolled_date`),
@@ -119,6 +123,29 @@ CREATE TABLE `waitlist` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
+-- TABLE: room_service_requests
+-- Student-initiated room change / cancellation queue for wardens.
+-- =====================================================================
+CREATE TABLE `room_service_requests` (
+  `id`                   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `student_id`           INT UNSIGNED NOT NULL,
+  `request_type`         ENUM('room_change','room_cancellation') NOT NULL,
+  `status`               ENUM('pending','approved','rejected','completed') NOT NULL DEFAULT 'pending',
+  `preferred_room_type`  ENUM('single','double','triple','dormitory') DEFAULT NULL,
+  `message`              TEXT DEFAULT NULL,
+  `admin_notes`          TEXT DEFAULT NULL,
+  `created_at`           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `processed_at`         TIMESTAMP NULL DEFAULT NULL,
+  `processed_by`         INT UNSIGNED DEFAULT NULL,
+  INDEX `idx_rsr_student` (`student_id`),
+  INDEX `idx_rsr_status` (`status`),
+  CONSTRAINT `fk_rsr_student` FOREIGN KEY (`student_id`)
+    REFERENCES `students`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_rsr_processor` FOREIGN KEY (`processed_by`)
+    REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
 -- TABLE: fee_structures
 -- Defines various fee types (rent, utility, laundry, etc.).
 -- =====================================================================
@@ -149,7 +176,7 @@ CREATE TABLE `payments` (
   `receipt_no`     VARCHAR(50) NOT NULL,
   `payment_method` ENUM('cash','bank','online') NOT NULL DEFAULT 'cash',
   `recorded_by`    INT UNSIGNED DEFAULT NULL,
-  `month_year`         VARCHAR(10) DEFAULT NULL,
+  `month_year`         VARCHAR(40) DEFAULT NULL,
   `notes`              TEXT DEFAULT NULL,
   `billing_charge_id`  INT UNSIGNED DEFAULT NULL,
   `created_at`         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -174,7 +201,7 @@ CREATE TABLE `billing_charges` (
   `id`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `student_id`    INT UNSIGNED NOT NULL,
   `fee_id`        INT UNSIGNED NOT NULL,
-  `period_month`  VARCHAR(7) NOT NULL COMMENT 'YYYY-MM',
+  `period_month`  VARCHAR(40) NOT NULL COMMENT 'YYYY-MM or TRF-* unique key',
   `amount_due`    DECIMAL(10,2) NOT NULL,
   `status`        ENUM('pending','paid','waived') NOT NULL DEFAULT 'pending',
   `issued_by`     INT UNSIGNED DEFAULT NULL,
@@ -232,6 +259,24 @@ CREATE TABLE `notices` (
   INDEX `idx_notices_pinned` (`is_pinned`),
   CONSTRAINT `fk_notices_poster` FOREIGN KEY (`posted_by`)
     REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABLE: user_notifications
+-- In-app alerts (e.g. new billing slips) per login user.
+-- =====================================================================
+CREATE TABLE `user_notifications` (
+  `id`                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `user_id`           INT UNSIGNED NOT NULL,
+  `title`             VARCHAR(200) NOT NULL,
+  `body`              TEXT NOT NULL,
+  `notification_type` VARCHAR(40) NOT NULL DEFAULT 'general',
+  `is_read`           TINYINT(1) NOT NULL DEFAULT 0,
+  `created_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_un_user_read` (`user_id`, `is_read`),
+  INDEX `idx_un_created` (`created_at`),
+  CONSTRAINT `fk_un_user` FOREIGN KEY (`user_id`)
+    REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
@@ -296,7 +341,54 @@ INSERT INTO `fee_structures` (`name`, `amount`, `frequency`, `is_active`, `fee_c
 ('Dining / Meal Plan', 4000.00, 'monthly', TRUE, 'meal', NULL),
 ('Utility Charge', 500.00, 'monthly', TRUE, 'utility', NULL),
 ('Laundry Service', 300.00, 'monthly', TRUE, 'service', NULL),
-('Annual Maintenance', 2000.00, 'yearly', TRUE, 'other', NULL);
+('Annual Maintenance', 2000.00, 'yearly', TRUE, 'other', NULL),
+('Room transfer fee', 1500.00, 'one_time', TRUE, 'service', NULL);
+
+-- =====================================================================
+-- TABLE: staff_details
+-- Payroll profile for staff / warden (linked to users).
+-- =====================================================================
+CREATE TABLE `staff_details` (
+  `id`                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `user_id`               INT UNSIGNED NOT NULL,
+  `basic_salary`          DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `join_date`             DATE NOT NULL,
+  `last_increment_date`   DATE DEFAULT NULL,
+  `bank_account`          VARCHAR(100) DEFAULT NULL,
+  `bank_name`             VARCHAR(100) DEFAULT NULL,
+  UNIQUE KEY `uk_staff_user` (`user_id`),
+  CONSTRAINT `fk_staff_user` FOREIGN KEY (`user_id`)
+    REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABLE: pay_slips
+-- Staff pay slip workflow (apply → approve → pay).
+-- =====================================================================
+CREATE TABLE `pay_slips` (
+  `id`                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `user_id`             INT UNSIGNED NOT NULL,
+  `month_year`          VARCHAR(7) NOT NULL,
+  `basic_salary`        DECIMAL(10,2) NOT NULL,
+  `performance_bonus`   DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `deductions`          DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `net_salary`          DECIMAL(10,2) NOT NULL,
+  `status`              ENUM('applied','approved','paid','rejected') NOT NULL DEFAULT 'applied',
+  `office_days`         TINYINT UNSIGNED DEFAULT NULL,
+  `approved_by`         INT UNSIGNED DEFAULT NULL,
+  `paid_by`             INT UNSIGNED DEFAULT NULL,
+  `admin_notes`         TEXT,
+  `created_at`          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `paid_at`             TIMESTAMP NULL DEFAULT NULL,
+  UNIQUE KEY `uk_payslip_user_month` (`user_id`,`month_year`),
+  INDEX `idx_payslip_status` (`status`),
+  CONSTRAINT `fk_payslip_user` FOREIGN KEY (`user_id`)
+    REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_payslip_approver` FOREIGN KEY (`approved_by`)
+    REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_payslip_payer` FOREIGN KEY (`paid_by`)
+    REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
 -- TABLE: transactions

@@ -35,7 +35,7 @@ ob_start();
 <!-- RIGHT PANEL: FORM -->
 <div class="login-right">
     <h4 class="fw-bold mb-1">Create Your Account</h4>
-    <p class="text-muted mb-4">You'll be placed in our room allocation waitlist.</p>
+    <p class="text-muted mb-4">Choose a room type and join the waitlist. After fees are issued and paid, the office allocates a matching room.</p>
 
     <?php if (!empty($errors)): ?>
     <div class="alert alert-danger px-3 py-2 text-sm">
@@ -82,6 +82,24 @@ ob_start();
                     <input type="text" class="form-control" id="regCourse" name="course" placeholder="B.Tech CS" value="<?php echo e($data['course'] ?? ''); ?>" required>
                     <label for="regCourse">Course / Department</label>
                 </div>
+            </div>
+        </div>
+
+        <?php
+        $vacancy = $vacancyByType ?? ['single' => 0, 'double' => 0, 'triple' => 0, 'dormitory' => 0];
+        $prt = $data['preferred_room_type'] ?? '';
+        ?>
+        <div class="row g-3 mb-3">
+            <div class="col-12">
+                <label for="regRoomPref" class="form-label">Preferred room type <span class="text-danger">*</span></label>
+                <select class="form-select form-select-lg" id="regRoomPref" name="preferred_room_type" required>
+                    <option value="" disabled <?php echo $prt === '' ? 'selected' : ''; ?>>Choose based on availability (you can still join the waitlist if full)</option>
+                    <option value="single" <?php echo $prt === 'single' ? 'selected' : ''; ?>>Single — <?php echo (int) ($vacancy['single'] ?? 0); ?> bed(s) free now</option>
+                    <option value="double" <?php echo $prt === 'double' ? 'selected' : ''; ?>>Double — <?php echo (int) ($vacancy['double'] ?? 0); ?> bed(s) free now</option>
+                    <option value="triple" <?php echo $prt === 'triple' ? 'selected' : ''; ?>>Triple — <?php echo (int) ($vacancy['triple'] ?? 0); ?> bed(s) free now</option>
+                    <option value="dormitory" <?php echo $prt === 'dormitory' ? 'selected' : ''; ?>>Dormitory — <?php echo (int) ($vacancy['dormitory'] ?? 0); ?> bed(s) free now</option>
+                </select>
+                <small class="text-muted">Enrollment billing uses this to issue the correct room-rent slip before you are allocated.</small>
             </div>
         </div>
 

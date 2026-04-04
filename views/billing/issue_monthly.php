@@ -4,7 +4,7 @@
     <h2 class="mb-1">Issue monthly bills</h2>
     <p class="text-muted mb-0">
         After month-end (or on your schedule), select fees and create <strong>pending slips</strong> for residents.
-        Students only see amounts here in the payment portal—meal, utilities, rent, and other recurring items work the same way.
+        <strong>Room rent</strong> lines (Single / Double / Triple / Dormitory) are issued only to students currently allocated to that room type; meal, utility, and other fees go to everyone you include in the scope.
     </p>
 </div>
 
@@ -37,7 +37,7 @@
             </div>
 
             <label class="form-label">Fees to include <span class="text-danger">*</span></label>
-            <p class="text-muted small">Tick every component you want on this run (e.g. dining, utility, monthly rent).</p>
+            <p class="text-muted small">Tick every component you want on this run (e.g. all four monthly rent tiers plus dining and utility). Each student receives only the rent line that matches their allocated room.</p>
 
             <?php if (empty($fees)): ?>
             <div class="alert alert-warning">No eligible fee types found. Add active fees in the database (monthly/yearly, not only security deposit).</div>

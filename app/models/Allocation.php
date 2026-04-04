@@ -185,6 +185,20 @@ class Allocation
      */
     public function waitlistAdd(int $studentId, ?string $preferredRoomType = null): int
     {
+        $stmt = $this->db->query(
+            'SELECT id FROM waitlist WHERE student_id = :sid AND status = :st LIMIT 1',
+            ['sid' => $studentId, 'st' => 'waiting']
+        );
+        $existing = $stmt->fetch();
+        if ($existing) {
+            if ($preferredRoomType !== null && $preferredRoomType !== '') {
+                $this->db->query(
+                    'UPDATE waitlist SET preferred_room_type = :prt WHERE id = :id',
+                    ['prt' => $preferredRoomType, 'id' => (int) $existing['id']]
+                );
+            }
+            return (int) $existing['id'];
+        }
         $this->db->query(
             "INSERT INTO waitlist (student_id, preferred_room_type, status) VALUES (:student_id, :prt, 'waiting')",
             ['student_id' => $studentId, 'prt' => $preferredRoomType]
@@ -203,7 +217,7 @@ class Allocation
              JOIN students s ON w.student_id = s.id
              JOIN users u ON s.user_id = u.id
              WHERE w.status = 'waiting'
-               AND COALESCE(w.preferred_room_type, s.entitled_room_type) = :rt
+               AND COALESCE(s.entitled_room_type, w.preferred_room_type) = :rt
              ORDER BY w.requested_at ASC
              LIMIT 1",
             ['rt' => $roomType]
@@ -254,6 +268,43 @@ class Allocation
             ['status' => $status, 'sid' => $studentId]
         );
         return true;
+    }
+
+    /**
+     * Update or create a waiting waitlist row with the chosen room tier.
+     * Not allowed when the student already has an active room allocation.
+     *
+     * @return string|null Error message, or null on success
+     */
+    public function updateStudentWaitlistPreference(int $studentId, string $roomType): ?string
+    {
+        $allowed = ['single', 'double', 'triple', 'dormitory'];
+        if (!in_array($roomType, $allowed, true)) {
+            return 'Please choose a valid room type.';
+        }
+        if ($this->findActiveByStudent($studentId)) {
+            return 'You already have an allocated room. Contact the office if you need to change category.';
+        }
+        $this->waitlistAdd($studentId, $roomType);
+        return null;
+    }
+
+    /**
+     * Preferred room tier on the active waitlist row (for enrollment billing).
+     */
+    public function waitlistPreferredType(int $studentId): ?string
+    {
+        $stmt = $this->db->query(
+            "SELECT preferred_room_type FROM waitlist
+             WHERE student_id = :sid AND status = 'waiting'
+             ORDER BY requested_at ASC LIMIT 1",
+            ['sid' => $studentId]
+        );
+        $r = $stmt->fetch();
+        if (!$r || empty($r['preferred_room_type'])) {
+            return null;
+        }
+        return (string) $r['preferred_room_type'];
     }
 
     /**

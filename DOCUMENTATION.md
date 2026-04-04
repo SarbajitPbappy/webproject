@@ -1,7 +1,7 @@
 # HostelEase — Technical Documentation
 
-**Version:** 1.0.0  
-**Last updated:** April 3, 2026
+**Version:** 1.1.0  
+**Last updated:** April 4, 2026
 
 This document describes architecture, configuration, security, database concepts, routing, and deployment for developers and operators. The **user-facing overview** is in [README.md](README.md).
 
@@ -91,6 +91,8 @@ If `url` is empty or `/`, the router uses `LandingController::index`.
 | `Profile` | `ProfileController` |
 | `Payroll` | `PayrollController` |
 | `Finances` / `Finance` | `FinanceController` |
+| `Billing` | `BillingController` |
+| `Notifications` / `Notification` | `NotificationController` |
 
 ### Action names
 
@@ -136,15 +138,42 @@ This is important on **Render** and similar proxies: set `APP_ENV=production` an
 
 ### Base schema
 
-`database/hostelease.sql` creates core tables: `users`, `students`, `rooms`, `allocations`, `waitlist`, `fee_structures`, `payments`, `complaints`, `notices`, `audit_logs`, `password_resets`, `login_attempts`, `transactions`, etc.
+`database/hostelease.sql` creates core tables: `users`, `students` (including `billing_credit_balance` where migrated), `rooms`, `allocations`, `waitlist`, `room_service_requests`, `fee_structures`, `payments`, `billing_charges`, `complaints`, `notices`, `audit_logs`, `password_resets`, `login_attempts`, `staff_details`, `pay_slips`, `transactions`, `user_notifications`, etc. Import this for a clean install, then run `admin_seed.php` and any optional migrations if your file predates a feature.
 
-### Payroll migration
+### Payroll and schema add-ons
 
-`database/migrations/migrate_payroll.php` ensures `transactions`, `staff_details`, and `pay_slips` exist and align with the ledger/payroll features. Run after schema import if you use payroll.
+- **`migrate_payroll_tables_safe.php`** — Creates `staff_details` and `pay_slips` if missing and backfills staff rows **without** truncating data (recommended for production). Use this if payroll errors with “table not found”.
+- **`migrate_payroll.php`** — Older script that also seeds `transactions` from payments and **truncates** some tables; prefer the safe script above unless you intentionally reset payroll data.
+- **`migrate_room_requests_transfer_fee.php`** — `room_service_requests`, wider `billing_charges.period_month` / `payments.month_year`, catalog “Room transfer fee”.
+- **`migrate_student_billing_credit.php`** — `students.billing_credit_balance` for tier-change credits on room rent slips.
+- **`migrate_user_notifications.php`**, **`migrate_students_registration_profile.php`** — As noted below.
 
 ### Seeding
 
-`database/seeds/admin_seed.php` creates the first `super_admin` if `admin@hostelease.com` does not exist.
+`database/seeds/admin_seed.php` creates the first `super_admin` if `admin@hostelease.com` does not exist:
+
+| Field | Value |
+|-------|--------|
+| Email | `admin@hostelease.com` |
+| Password | `Admin@123` |
+
+### Demo dataset (`@hallportal.demo.bd`)
+
+`database/seeds/bangladesh_demo_seed.php` adds a full demo org (run from the `hostelease` directory):
+
+| Role | Count | Emails | Password |
+|------|-------|--------|----------|
+| Warden (`admin`) | 2 | `kamrul.hasan.warden@hallportal.demo.bd`, `farzana.chowdhury.warden@hallportal.demo.bd` | `Warden@123` |
+| Staff | 10 | `staff01@hallportal.demo.bd` … `staff10@hallportal.demo.bd` | `Staff@123` |
+| Student | 100 | `stu001.hall@hallportal.demo.bd` … `stu100.hall@hallportal.demo.bd` | `Student@123` |
+
+**Super Admin** for demos stays **`admin@hostelease.com`** / **`Admin@123`** (from `admin_seed.php`), not the hallportal domain.
+
+**Related scripts**
+
+- `database/migrations/migrate_user_notifications.php` — in-app notification rows (e.g. new bills).
+- `database/migrations/migrate_students_registration_profile.php` — `students.gender` / `students.course` for self-registration.
+- `database/seeds/demo_hostel_building_allocate.php` — optional `DEMO-*` 10-floor block, allocates all 100 demo students; flags `--force`, `--with-billing`.
 
 ### Entity relationships (high level)
 
@@ -172,7 +201,7 @@ This is important on **Render** and similar proxies: set `APP_ENV=production` an
 | Student/room CRUD, allocations | Yes | Yes | — | — |
 | Record manual student payment (`payments/record`, `store`) | No | Yes | — | — |
 | Payment list / receipts (oversight) | Yes | Yes | Own / scoped | Own / scoped |
-| Online fee portal (`makePayment`, `processPortal`) | **No** | Yes (if student profile) | Yes | Yes (if student profile) |
+| Online fee portal (`makePayment`, `processPortal`, `processPortalAll`) | **No** | Yes (if student profile) | Yes | Yes (if student profile) |
 | Payroll: apply (`payroll/index`, `apply`) | — | Yes | — | Yes |
 | Payroll: review/approve (`payroll/review`, `processApproval`) | Yes | Yes | — | — |
 | Payroll: distribute/pay (`payroll/distribute`, `pay`) | **Yes** | — | — | — |
@@ -188,11 +217,26 @@ This is important on **Render** and similar proxies: set `APP_ENV=production` an
 ### Payments
 
 - Receipt numbers are generated with prefix `RECEIPT_PREFIX` (e.g. `RCP-YYYYMM-XXXX`).
-- Portal amounts should be validated against `fee_structures` in the controller (not trusted blindly from the client).
+- Portal amounts come from warden-issued `billing_charges`; the student portal can pay **all pending slips in one checkout** (`processPortalAll`), creating one payment/receipt per slip in a single transaction.
+- **`payments/balanceSheet`** — Student-facing ledger: room rent credit, pending slips, payment history (including prepayments), and paid slip history.
+- **`payments/processPrepay`** — Advance payment for a **billing month** (`YYYY-MM`) before a slip exists; stored on `payments` with `month_year`. When the warden runs **issue monthly**, `BillingCharge::issueBulk` **reduces or omits** lines for which prepayment already covers the catalog amount.
+
+### Billing and in-app notifications
+
+- `BillingController` issues slips from `fee_structures`; eligible students receive rows in `user_notifications` when new slips are created.
+- **`BillingCharge::issueBulk`** (monthly and enrollment):
+  - **Room rent:** only when `maps_room_type` matches the student’s **active allocation** (or waitlist tier when enrollment mode is on).
+  - **Prepaid:** for `period_month` in `YYYY-MM`, skips or reduces a line when `Payment::totalPaidForFeeMonth` already covers the catalog amount for that student + fee + month.
+  - **Yearly fees** (e.g. **Annual Maintenance**, `frequency = yearly`): payments for that **fee + calendar year** (derived from `period_month`) are summed via `Payment::totalPaidForYearlyFeeInYear`. If the student has **already paid the full catalog amount** for that year, **no slip** is created; if they paid **part** of it earlier in the year, the new slip is for the **remainder** only (then the usual prepay and room-credit rules apply).
+  - **Room rent credit:** `students.billing_credit_balance` reduces the next tier-matched room rent slip after downgrades or approved upgrades (see allocations).
+- `NotificationController` + `user_notifications` power the student/staff bell and **Notifications** sidebar link.
 
 ### Allocations and automation
 
-- When a student **vacates** and the room has capacity, logic can assign the next **waitlist** entry to that room (see `AllocationController::vacate`).
+- **New allocation** (waitlist-only dropdown): students with `waitlist.status = waiting` and no active allocation.
+- **Transfer** includes optional **transfer fee** handling (slip, offline record, waive for super admin) and **tier billing credits** via `Student::applyTierChangeBillingCredit`.
+- **Room requests** (`allocations/roomRequests`, `students/roomRequests`): room change / cancellation; on **approve** room change, the system attempts an **automatic transfer** to a vacant room of the preferred type, updates `entitled_room_type`, and marks the request **completed** when successful.
+- When a student **vacates** and the room has capacity, logic can assign the next **waitlist** entry to that room (see `AllocationController::vacate` / `performVacateWithAutomation`).
 
 ### Payroll
 
@@ -244,7 +288,7 @@ This is important on **Render** and similar proxies: set `APP_ENV=production` an
 1. **Root directory:** `hostelease` if the repo contains that subfolder.
 2. **Environment** — Set `APP_ENV=production`, all `DB_*` variables, `DB_SSL=true` if required, and `DB_PASS`.
 3. **`BASE_URL`** — Either unset (derive from request) or `https://<your-service>.onrender.com/`.
-4. **Database** — Import SQL, run `admin_seed.php`, then `migrate_payroll.php` if needed.
+4. **Database** — Import SQL, run `admin_seed.php`, then `migrate_payroll_tables_safe.php` (and other migrations from README) if needed.
 
 ### Apache
 
@@ -266,7 +310,7 @@ This is important on **Render** and similar proxies: set `APP_ENV=production` an
 | Database connection failed | `DB_PASS`, host/port, firewall, `DB_SSL=true` for Aiven |
 | `sslmode` / SSL errors | `DB_SSL=true` in `.env`; provider CA if you verify certs strictly |
 | CSRF / session issues | Same-site cookies, `BASE_URL` consistency, clock skew |
-| Payroll menu empty | Run `migrate_payroll.php`; ensure `staff_details` rows exist |
+| Payroll menu empty / `staff_details` missing | Run `php database/migrations/migrate_payroll_tables_safe.php` |
 | Upload failures | `upload_max_filesize`, `post_max_size`, directory permissions |
 
 ### Development debugging
@@ -293,8 +337,12 @@ Below, **access** is abbreviated: SA = super_admin, A = admin, St = student, T =
 | `allocations/*` | Allocation | * | SA, A |
 | `payments/index` | Payment | index | SA, A, St, T |
 | `payments/record`, `payments/store` | Payment | record, store | A |
-| `payments/makePayment`, `payments/processPortal` | Payment | makePayment, processPortal | St, A, T (not SA) |
+| `payments/makePayment`, `payments/processPortal`, `payments/processPortalAll`, `payments/processPrepay`, `payments/balanceSheet` | Payment | makePayment, processPortal, processPortalAll, processPrepay, balanceSheet | St, A, T (not SA) |
 | `payments/receiptView/{id}` | Payment | receiptView | SA, A, St, T |
+| `students/roomRequests` | Student | roomRequests | St, T (student profile) |
+| `allocations/roomRequests`, `allocations/roomRequestProcess` | Allocation | roomRequests, roomRequestProcess | SA, A |
+| `billing/issueMonthly`, `billing/issueEnrollment` | Billing | issueMonthly, issueEnrollment | SA, A |
+| `notifications/index`, `notifications/markRead/{id}`, `notifications/markAllRead` | Notification | index, markRead, markAllRead | Authenticated |
 | `complaints/*` | Complaint | * | Role-dependent |
 | `notices/*` | Notice | * | SA, A (writes); read for others |
 | `audit/index` | Audit | index | SA |

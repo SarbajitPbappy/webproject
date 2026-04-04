@@ -7,6 +7,8 @@
 
 require_once APP_ROOT . '/app/models/User.php';
 require_once APP_ROOT . '/app/models/Student.php';
+require_once APP_ROOT . '/app/models/Allocation.php';
+require_once APP_ROOT . '/app/models/Room.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
 require_once APP_ROOT . '/app/helpers/upload.php';
 
@@ -68,6 +70,18 @@ class ProfileController
         
         $errors = [];
 
+        $studentProfile = $this->studentModel->findByUserId($userId);
+        $allocationModel = new Allocation();
+        $canChangeRoomPref = false;
+        $waitlistPreferredType = null;
+        $vacancyByType = [];
+        if ($studentProfile) {
+            $sid = (int) $studentProfile['id'];
+            $canChangeRoomPref = !$allocationModel->findActiveByStudent($sid);
+            $waitlistPreferredType = $allocationModel->waitlistPreferredType($sid);
+            $vacancyByType = (new Room())->countOpenBedsByRoomType();
+        }
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!verifyToken()) {
                  $errors[] = 'Invalid security token.';
@@ -78,6 +92,14 @@ class ProfileController
 
                   if (empty($fullName)) {
                       $errors[] = "Full Name is required.";
+                  }
+
+                  $roomPrefPosted = sanitize($_POST['preferred_room_type'] ?? '');
+                  $allowedTiers = ['single', 'double', 'triple', 'dormitory'];
+                  if ($studentProfile && $canChangeRoomPref) {
+                      if (!in_array($roomPrefPosted, $allowedTiers, true)) {
+                          $errors[] = 'Please select your preferred room type.';
+                      }
                   }
 
                   if (empty($errors)) {
@@ -119,6 +141,16 @@ class ProfileController
                               ':uid' => $userId
                           ]);
 
+                          if ($studentProfile && $canChangeRoomPref) {
+                              $wlErr = $allocationModel->updateStudentWaitlistPreference(
+                                  (int) $studentProfile['id'],
+                                  $roomPrefPosted
+                              );
+                              if ($wlErr !== null) {
+                                  throw new \RuntimeException($wlErr);
+                              }
+                          }
+
                           $db->commit();
                           
                           $_SESSION['user_name'] = $fullName;
@@ -126,7 +158,12 @@ class ProfileController
                               $_SESSION['user_photo'] = $newProfilePhoto;
                           }
 
-                          AuditLog::log($userId, 'UPDATE', 'users', $userId, 'User updated their profile details');
+                          $logMsg = 'User updated their profile details';
+                          if ($studentProfile && $canChangeRoomPref) {
+                              $logMsg .= '; waitlist room preference set to ' . $roomPrefPosted;
+                              $waitlistPreferredType = $roomPrefPosted;
+                          }
+                          AuditLog::log($userId, 'UPDATE', 'users', $userId, $logMsg);
 
                           setFlash('success', 'Profile updated successfully!');
                           header('Location: ' . BASE_URL . '?url=profile/index');
@@ -135,7 +172,9 @@ class ProfileController
                       } catch (Exception $e) {
                           $db->rollBack();
                           error_log("Profile Update Error: " . $e->getMessage());
-                          $errors[] = "An error occurred while updating the profile.";
+                          $errors[] = $e instanceof \RuntimeException
+                              ? $e->getMessage()
+                              : 'An error occurred while updating the profile.';
                       }
                   }
             }

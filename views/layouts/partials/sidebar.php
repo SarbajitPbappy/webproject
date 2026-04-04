@@ -79,6 +79,13 @@ function isActive(string $segment, string $currentUrl): string
                 </a>
             </li>
 
+            <li class="sidebar-menu-item <?php echo isActive('allocations/roomRequests', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=allocations/roomRequests" class="sidebar-link">
+                    <i class="bi bi-inboxes-fill"></i>
+                    <span>Room requests</span>
+                </a>
+            </li>
+
             <li class="sidebar-menu-item <?php echo isActive('allocations/occupancy', $currentUrl); ?>">
                 <a href="<?php echo BASE_URL; ?>?url=allocations/occupancy" class="sidebar-link">
                     <i class="bi bi-house-door-fill"></i>
@@ -122,6 +129,25 @@ function isActive(string $segment, string $currentUrl): string
                 <a href="<?php echo BASE_URL; ?>?url=notices/index" class="sidebar-link">
                     <i class="bi bi-megaphone-fill"></i>
                     <span>Notices</span>
+                </a>
+            </li>
+
+            <li class="sidebar-menu-item <?php echo isActive('notifications', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=notifications/index" class="sidebar-link">
+                    <i class="bi bi-bell-fill"></i>
+                    <span class="d-flex align-items-center gap-2">
+                        <span>Notifications</span>
+                        <?php
+                        $nUid = (int) ($user['id'] ?? 0);
+                        if ($nUid > 0 && ($user['role'] ?? '') !== 'super_admin') {
+                            require_once APP_ROOT . '/app/models/UserNotification.php';
+                            $nb = UserNotification::unreadCountForUser($nUid);
+                            if ($nb > 0) {
+                                echo '<span class="badge rounded-pill bg-primary">' . (int) $nb . '</span>';
+                            }
+                        }
+                        ?>
+                    </span>
                 </a>
             </li>
 
@@ -181,6 +207,18 @@ function isActive(string $segment, string $currentUrl): string
                 <a href="<?php echo BASE_URL; ?>?url=payments/makePayment" class="sidebar-link">
                     <i class="bi bi-credit-card-fill text-primary"></i>
                     <span class="text-primary fw-bold">Pay Fees Online</span>
+                </a>
+            </li>
+            <li class="sidebar-menu-item <?php echo isActive('payments/balanceSheet', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=payments/balanceSheet" class="sidebar-link">
+                    <i class="bi bi-table"></i>
+                    <span>Fee balance sheet</span>
+                </a>
+            </li>
+            <li class="sidebar-menu-item <?php echo isActive('students/roomRequests', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=students/roomRequests" class="sidebar-link">
+                    <i class="bi bi-door-open"></i>
+                    <span>Room change / cancel</span>
                 </a>
             </li>
             <?php endif; ?>

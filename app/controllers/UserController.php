@@ -33,8 +33,10 @@ class UserController
         if ($role)   { $where[] = 'u.role = :role';   $params[':role'] = $role; }
         if ($status) { $where[] = 'u.status = :status'; $params[':status'] = $status; }
         if ($search) {
-            $where[] = '(u.full_name LIKE :search OR u.email LIKE :search)';
-            $params[':search'] = '%' . $search . '%';
+            $like = '%' . $search . '%';
+            $where[] = '(u.full_name LIKE :search_fn OR u.email LIKE :search_em)';
+            $params[':search_fn'] = $like;
+            $params[':search_em'] = $like;
         }
 
         $sql = "SELECT u.id, u.full_name, u.email, u.role, u.status, u.created_at,

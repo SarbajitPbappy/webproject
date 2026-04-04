@@ -57,8 +57,11 @@ class Student
         }
 
         if (!empty($filters['search'])) {
-            $where[] = "(u.full_name LIKE :search OR u.email LIKE :search OR s.student_id_no LIKE :search)";
-            $params[':search'] = '%' . $filters['search'] . '%';
+            $like = '%' . $filters['search'] . '%';
+            $where[] = '(u.full_name LIKE :search_fn OR u.email LIKE :search_em OR s.student_id_no LIKE :search_id)';
+            $params[':search_fn'] = $like;
+            $params[':search_em'] = $like;
+            $params[':search_id'] = $like;
         }
 
         $whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
@@ -88,7 +91,10 @@ class Student
     public function getForDropdown(): array
     {
         $stmt = $this->db->query("
-            SELECT s.id, s.student_id_no, s.entitled_room_type, u.full_name 
+            SELECT s.id, s.student_id_no, s.entitled_room_type, u.full_name,
+                   (SELECT w2.preferred_room_type FROM waitlist w2
+                    WHERE w2.student_id = s.id AND w2.status = 'waiting'
+                    ORDER BY w2.requested_at ASC LIMIT 1) AS waitlist_preferred_room_type
             FROM students s
             JOIN users u ON s.user_id = u.id
             WHERE u.status = 'active'
@@ -96,7 +102,58 @@ class Student
         ");
         return $stmt->fetchAll();
     }
-    
+
+    /**
+     * Students on the waitlist (waiting) with no active room — for new allocations only.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function getWaitlistedForDropdown(): array
+    {
+        $stmt = $this->db->query("
+            SELECT s.id, s.student_id_no, s.entitled_room_type, u.full_name,
+                   (SELECT w2.preferred_room_type FROM waitlist w2
+                    WHERE w2.student_id = s.id AND w2.status = 'waiting'
+                    ORDER BY w2.requested_at ASC LIMIT 1) AS waitlist_preferred_room_type
+            FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE u.status = 'active'
+              AND EXISTS (
+                  SELECT 1 FROM waitlist w
+                  WHERE w.student_id = s.id AND w.status = 'waiting'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM allocations a
+                  WHERE a.student_id = s.id AND a.status = 'active'
+              )
+            ORDER BY u.full_name ASC
+        ");
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * True if student is on the waitlist (waiting) and has no active allocation.
+     */
+    public function isWaitlistedForNewAllocation(int $studentId): bool
+    {
+        $stmt = $this->db->query(
+            "SELECT 1 FROM students s
+             JOIN users u ON s.user_id = u.id
+             WHERE s.id = :id AND u.status = 'active'
+               AND EXISTS (
+                   SELECT 1 FROM waitlist w
+                   WHERE w.student_id = s.id AND w.status = 'waiting'
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM allocations a
+                   WHERE a.student_id = s.id AND a.status = 'active'
+               )
+             LIMIT 1",
+            ['id' => $studentId]
+        );
+        return (bool) $stmt->fetch();
+    }
+
     /**
      * Get students currently holding an active allocation for dropdowns
      */
@@ -165,6 +222,91 @@ class Student
     public function findById(int $id): ?array
     {
         return $this->find($id);
+    }
+
+    /** Catalog monthly room rent for a physical tier (fee_structures.room_rent + maps_room_type). */
+    public function catalogMonthlyRentForRoomType(string $roomType): float
+    {
+        $stmt = $this->db->query(
+            "SELECT amount FROM fee_structures
+             WHERE fee_category = 'room_rent' AND maps_room_type = :t AND is_active = TRUE
+             LIMIT 1",
+            ['t' => $roomType]
+        );
+        $r = $stmt->fetch();
+
+        return $r ? (float) $r['amount'] : 0.0;
+    }
+
+    public function getBillingCreditBalance(int $studentId): float
+    {
+        try {
+            $stmt = $this->db->query(
+                'SELECT billing_credit_balance FROM students WHERE id = :id LIMIT 1',
+                ['id' => $studentId]
+            );
+            $r = $stmt->fetch();
+        } catch (Throwable $e) {
+            return 0.0;
+        }
+
+        return $r ? (float) ($r['billing_credit_balance'] ?? 0) : 0.0;
+    }
+
+    public function addBillingCredit(int $studentId, float $amount): void
+    {
+        if ($amount <= 0.0001 || $studentId <= 0) {
+            return;
+        }
+        $this->db->query(
+            'UPDATE students SET billing_credit_balance = billing_credit_balance + :a WHERE id = :id',
+            ['a' => $amount, 'id' => $studentId]
+        );
+    }
+
+    public function deductBillingCredit(int $studentId, float $amount): void
+    {
+        if ($amount <= 0.0001 || $studentId <= 0) {
+            return;
+        }
+        $this->db->query(
+            'UPDATE students SET billing_credit_balance = GREATEST(0, billing_credit_balance - :a) WHERE id = :id',
+            ['a' => $amount, 'id' => $studentId]
+        );
+    }
+
+    public function setEntitledRoomType(int $studentId, string $roomType): void
+    {
+        $allowed = ['single', 'double', 'triple', 'dormitory'];
+        if (!in_array($roomType, $allowed, true) || $studentId <= 0) {
+            return;
+        }
+        $this->db->query(
+            'UPDATE students SET entitled_room_type = :t WHERE id = :id',
+            ['t' => $roomType, 'id' => $studentId]
+        );
+    }
+
+    /**
+     * After a physical room tier change: credit downgrade difference, or one month of old tier toward higher rent after upgrade.
+     */
+    public function applyTierChangeBillingCredit(int $studentId, string $oldRoomType, string $newRoomType): void
+    {
+        if ($oldRoomType === '' || $newRoomType === '' || $oldRoomType === $newRoomType) {
+            return;
+        }
+        $oldRent = $this->catalogMonthlyRentForRoomType($oldRoomType);
+        $newRent = $this->catalogMonthlyRentForRoomType($newRoomType);
+        if ($oldRent <= 0.009 && $newRent <= 0.009) {
+            return;
+        }
+        if ($newRent > $oldRent + 0.009) {
+            if ($oldRent > 0.009) {
+                $this->addBillingCredit($studentId, $oldRent);
+            }
+        } elseif ($oldRent > $newRent + 0.009) {
+            $this->addBillingCredit($studentId, $oldRent - $newRent);
+        }
     }
 
     /**

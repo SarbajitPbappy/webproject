@@ -187,6 +187,12 @@ class User
 
     // ─── Login Attempt Tracking ─────────────────────────────────────
 
+    private function loginAttemptsTableMissing(\PDOException $e): bool
+    {
+        return str_contains($e->getMessage(), 'login_attempts')
+            && (str_contains($e->getMessage(), "doesn't exist") || str_contains($e->getMessage(), 'Base table or view not found'));
+    }
+
     /**
      * Record a failed login attempt.
      *
@@ -195,10 +201,18 @@ class User
      */
     public function recordLoginAttempt(string $email, string $ip): void
     {
-        $this->db->query(
-            "INSERT INTO login_attempts (email, ip_address) VALUES (:email, :ip)",
-            ['email' => $email, 'ip' => $ip]
-        );
+        try {
+            $this->db->query(
+                "INSERT INTO login_attempts (email, ip_address) VALUES (:email, :ip)",
+                ['email' => $email, 'ip' => $ip]
+            );
+        } catch (\PDOException $e) {
+            if ($this->loginAttemptsTableMissing($e)) {
+                error_log('login_attempts table missing; run database/migrations/migrate_login_attempts.php — ' . $e->getMessage());
+                return;
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -209,14 +223,21 @@ class User
      */
     public function getLoginAttempts(string $email): int
     {
-        $stmt = $this->db->query(
-            "SELECT COUNT(*) as attempts FROM login_attempts
-             WHERE email = :email
-             AND attempted_at > DATE_SUB(NOW(), INTERVAL :seconds SECOND)",
-            ['email' => $email, 'seconds' => LOGIN_LOCKOUT_TIME]
-        );
-        $result = $stmt->fetch();
-        return (int) $result['attempts'];
+        try {
+            $stmt = $this->db->query(
+                "SELECT COUNT(*) as attempts FROM login_attempts
+                 WHERE email = :email
+                 AND attempted_at > DATE_SUB(NOW(), INTERVAL :seconds SECOND)",
+                ['email' => $email, 'seconds' => LOGIN_LOCKOUT_TIME]
+            );
+            $result = $stmt->fetch();
+            return (int) $result['attempts'];
+        } catch (\PDOException $e) {
+            if ($this->loginAttemptsTableMissing($e)) {
+                return 0;
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -226,10 +247,17 @@ class User
      */
     public function clearLoginAttempts(string $email): void
     {
-        $this->db->query(
-            "DELETE FROM login_attempts WHERE email = :email",
-            ['email' => $email]
-        );
+        try {
+            $this->db->query(
+                "DELETE FROM login_attempts WHERE email = :email",
+                ['email' => $email]
+            );
+        } catch (\PDOException $e) {
+            if ($this->loginAttemptsTableMissing($e)) {
+                return;
+            }
+            throw $e;
+        }
     }
 
     /**

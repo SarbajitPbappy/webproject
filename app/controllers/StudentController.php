@@ -9,6 +9,10 @@
 require_once APP_ROOT . '/app/models/Student.php';
 require_once APP_ROOT . '/app/models/User.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
+require_once APP_ROOT . '/app/models/Room.php';
+require_once APP_ROOT . '/app/models/Allocation.php';
+require_once APP_ROOT . '/app/models/RoomServiceRequest.php';
+require_once APP_ROOT . '/app/models/BillingCharge.php';
 require_once APP_ROOT . '/app/helpers/upload.php';
 
 class StudentController
@@ -74,6 +78,12 @@ class StudentController
             exit;
         }
 
+        $allocationModel = new Allocation();
+        $studentActiveAllocation = $allocationModel->findActiveByStudent((int) $student['id']);
+        $studentWaitlistRoomPref = $studentActiveAllocation
+            ? null
+            : $allocationModel->waitlistPreferredType((int) $student['id']);
+
         $pageTitle = 'Student Profile';
         ob_start();
         require_once APP_ROOT . '/views/students/show.php';
@@ -90,6 +100,7 @@ class StudentController
 
         $errors = [];
         $data = [];
+        $vacancyByType = (new Room())->countOpenBedsByRoomType();
         $pageTitle = 'Register New Student';
 
         ob_start();
@@ -122,14 +133,15 @@ class StudentController
         }
 
         $data = [
-            'full_name'      => sanitize($_POST['full_name'] ?? ''),
-            'email'          => sanitizeEmail($_POST['email'] ?? ''),
-            'student_id_no'  => sanitize($_POST['student_id_no'] ?? ''),
-            'phone'          => sanitizePhone($_POST['phone'] ?? ''),
-            'guardian_name'  => sanitize($_POST['guardian_name'] ?? ''),
-            'guardian_phone' => sanitizePhone($_POST['guardian_phone'] ?? ''),
-            'enrolled_date'  => sanitizeDate($_POST['enrolled_date'] ?? ''),
-            'password'       => $password,
+            'full_name'             => sanitize($_POST['full_name'] ?? ''),
+            'email'                 => sanitizeEmail($_POST['email'] ?? ''),
+            'student_id_no'         => sanitize($_POST['student_id_no'] ?? ''),
+            'phone'                 => sanitizePhone($_POST['phone'] ?? ''),
+            'guardian_name'         => sanitize($_POST['guardian_name'] ?? ''),
+            'guardian_phone'        => sanitizePhone($_POST['guardian_phone'] ?? ''),
+            'enrolled_date'         => sanitizeDate($_POST['enrolled_date'] ?? ''),
+            'password'              => $password,
+            'preferred_room_type'   => sanitize($_POST['preferred_room_type'] ?? ''),
         ];
 
         $errors = $this->validateStudent($data);
@@ -161,6 +173,7 @@ class StudentController
 
         if (!empty($errors)) {
             $pageTitle = 'Register New Student';
+            $vacancyByType = (new Room())->countOpenBedsByRoomType();
             ob_start();
             require_once APP_ROOT . '/views/students/create.php';
             $viewContent = ob_get_clean();
@@ -170,6 +183,12 @@ class StudentController
 
         try {
             $studentId = $this->studentModel->create($data);
+
+            $tierPref = $data['preferred_room_type'] ?? '';
+            $allowedTiers = ['single', 'double', 'triple', 'dormitory'];
+            if (in_array($tierPref, $allowedTiers, true)) {
+                (new Allocation())->waitlistAdd($studentId, $tierPref);
+            }
 
             AuditLog::log(
                 $_SESSION['user_id'],
@@ -192,6 +211,7 @@ class StudentController
             }
 
             $pageTitle = 'Register New Student';
+            $vacancyByType = (new Room())->countOpenBedsByRoomType();
             ob_start();
             require_once APP_ROOT . '/views/students/create.php';
             $viewContent = ob_get_clean();
@@ -376,6 +396,12 @@ class StudentController
 
         $errors = [];
 
+        $allocationModel = new Allocation();
+        $sid = (int) $student['id'];
+        $canChangeRoomPref = !$allocationModel->findActiveByStudent($sid);
+        $waitlistPreferredType = $allocationModel->waitlistPreferredType($sid);
+        $vacancyByType = (new Room())->countOpenBedsByRoomType();
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!verifyToken()) {
                 $errors[] = 'Invalid security token.';
@@ -384,12 +410,17 @@ class StudentController
                 $phone = sanitizePhone($_POST['phone'] ?? '');
                 $guardianName = sanitize($_POST['guardian_name'] ?? '');
                 $guardianPhone = sanitizePhone($_POST['guardian_phone'] ?? '');
+                $roomPrefPosted = sanitize($_POST['preferred_room_type'] ?? '');
+                $allowedTiers = ['single', 'double', 'triple', 'dormitory'];
 
                 if (empty($fullName)) {
                     $errors[] = 'Full name is required.';
                 }
                 if (empty($phone)) {
                     $errors[] = 'Phone number is required.';
+                }
+                if ($canChangeRoomPref && !in_array($roomPrefPosted, $allowedTiers, true)) {
+                    $errors[] = 'Please select your preferred room type.';
                 }
 
                 $newProfilePhoto = null;
@@ -443,6 +474,14 @@ class StudentController
                             ]
                         );
 
+                        if ($canChangeRoomPref) {
+                            $wlErr = $allocationModel->updateStudentWaitlistPreference($sid, $roomPrefPosted);
+                            if ($wlErr !== null) {
+                                throw new \RuntimeException($wlErr);
+                            }
+                            $waitlistPreferredType = $roomPrefPosted;
+                        }
+
                         $db->commit();
 
                         $_SESSION['user_name'] = $fullName;
@@ -450,14 +489,23 @@ class StudentController
                             $_SESSION['user_photo'] = $newProfilePhoto;
                         }
 
-                        AuditLog::log($userId, 'UPDATE', 'users', $userId, 'Student updated self profile');
+                        $logMsg = 'Student updated self profile';
+                        if ($canChangeRoomPref) {
+                            $logMsg .= '; waitlist preference ' . $roomPrefPosted;
+                        }
+                        AuditLog::log($userId, 'UPDATE', 'users', $userId, $logMsg);
                         setFlash('success', 'Profile updated successfully!');
 
                         header('Location: ' . BASE_URL . '?url=students/show');
                         exit;
                     } catch (\Exception $e) {
+                        if (isset($db) && $db->getConnection()->inTransaction()) {
+                            $db->rollBack();
+                        }
                         error_log('StudentController::editSelf() error: ' . $e->getMessage());
-                        $errors[] = 'An error occurred while updating your profile.';
+                        $errors[] = $e instanceof \RuntimeException
+                            ? $e->getMessage()
+                            : 'An error occurred while updating your profile.';
                     }
                 }
             }
@@ -466,6 +514,79 @@ class StudentController
         $pageTitle = 'Edit My Profile';
         ob_start();
         require_once APP_ROOT . '/views/profile/edit_student.php';
+        $viewContent = ob_get_clean();
+        require_once APP_ROOT . '/views/layouts/main.php';
+    }
+
+    /**
+     * Student / dual-profile staff: request room change or cancellation.
+     */
+    public function roomRequests(): void
+    {
+        requireAuth();
+        $student = $this->studentModel->findByUserId((int) $_SESSION['user_id']);
+        if (!$student) {
+            setFlash('error', 'This page is only for accounts with a student profile.');
+            header('Location: ' . BASE_URL . '?url=dashboard/index');
+            exit;
+        }
+
+        $studentId = (int) $student['id'];
+        $rsr = new RoomServiceRequest();
+        if (!$rsr->tableReady()) {
+            setFlash('error', 'Room requests are not set up yet. Ask the administrator to run the database migration.');
+            header('Location: ' . BASE_URL . '?url=dashboard/index');
+            exit;
+        }
+
+        $billing = new BillingCharge();
+        $pendingDue = $billing->pendingTotalForStudent($studentId);
+        $allocationModel = new Allocation();
+        $hasRoom = (bool) $allocationModel->findActiveByStudent($studentId);
+        $hasPending = $rsr->hasPending($studentId);
+        $existing = $rsr->forStudent($studentId);
+
+        $errors = [];
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (!verifyToken()) {
+                $errors[] = 'Invalid security token.';
+            } elseif ($hasPending) {
+                $errors[] = 'You already have a pending room request.';
+            } else {
+                $type = sanitize($_POST['request_type'] ?? '');
+                $pref = sanitize($_POST['preferred_room_type'] ?? '');
+                $message = sanitize($_POST['message'] ?? '');
+
+                if (!in_array($type, ['room_change', 'room_cancellation'], true)) {
+                    $errors[] = 'Please choose a valid request type.';
+                }
+                if ($type === 'room_change' && $pref !== '' && !in_array($pref, ['single', 'double', 'triple', 'dormitory'], true)) {
+                    $errors[] = 'Invalid preferred room type.';
+                }
+                if (!$hasRoom) {
+                    $errors[] = 'You do not have an active room allocation.';
+                }
+                if ($type === 'room_cancellation' && $pendingDue > 0.009) {
+                    $errors[] = 'You must clear all pending hall fees (৳' . number_format($pendingDue, 2)
+                        . ' outstanding) before you can request cancellation.';
+                }
+                if (empty($errors)) {
+                    $rsr->create([
+                        'student_id'            => $studentId,
+                        'request_type'          => $type,
+                        'preferred_room_type'   => ($type === 'room_change' && $pref !== '') ? $pref : null,
+                        'message'               => $message !== '' ? $message : null,
+                    ]);
+                    setFlash('success', 'Your request has been submitted.');
+                    header('Location: ' . BASE_URL . '?url=students/roomRequests');
+                    exit;
+                }
+            }
+        }
+
+        $pageTitle = 'Room change / cancellation';
+        ob_start();
+        require_once APP_ROOT . '/views/students/room_requests.php';
         $viewContent = ob_get_clean();
         require_once APP_ROOT . '/views/layouts/main.php';
     }

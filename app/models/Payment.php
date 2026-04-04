@@ -17,6 +17,69 @@ class Payment
     }
 
     /**
+     * Insert one payment row, resolve billing slip, sync entitlement, ledger row.
+     * Caller must already be inside a transaction (or call record() instead).
+     *
+     * Optional keys: billing_charge_id, skip_billing_resolve (bool).
+     */
+    private function insertPaymentWithLedger(array $data): int
+    {
+        $receiptNo = $this->generateReceiptNo();
+        $billingChargeId = isset($data['billing_charge_id']) ? (int) $data['billing_charge_id'] : 0;
+        if ($billingChargeId <= 0) {
+            $billingChargeId = null;
+        }
+
+        $this->db->query(
+            "INSERT INTO payments (student_id, fee_id, amount_paid, payment_date, receipt_no, payment_method, recorded_by, month_year, notes, billing_charge_id)
+             VALUES (:student_id, :fee_id, :amount_paid, :payment_date, :receipt_no, :method, :recorded_by, :month_year, :notes, :billing_charge_id)",
+            [
+                'student_id'        => $data['student_id'],
+                'fee_id'            => $data['fee_id'],
+                'amount_paid'       => $data['amount_paid'],
+                'payment_date'      => $data['payment_date'] ?? date('Y-m-d'),
+                'receipt_no'        => $receiptNo,
+                'method'            => $data['payment_method'] ?? 'cash',
+                'recorded_by'       => $data['recorded_by'],
+                'month_year'        => $data['month_year'] ?? date('Y-m'),
+                'notes'             => $data['notes'] ?? null,
+                'billing_charge_id' => $billingChargeId,
+            ]
+        );
+        $paymentId = (int) $this->db->lastInsertId();
+
+        if ($billingChargeId !== null) {
+            $this->db->query(
+                "UPDATE billing_charges SET status = 'paid', payment_id = :pid
+                 WHERE id = :cid AND student_id = :sid AND status = 'pending'",
+                ['pid' => $paymentId, 'cid' => $billingChargeId, 'sid' => $data['student_id']]
+            );
+        } elseif (empty($data['skip_billing_resolve'])) {
+            $this->resolvePendingBillingCharge(
+                $paymentId,
+                (int) $data['student_id'],
+                (int) $data['fee_id'],
+                (string) ($data['month_year'] ?? date('Y-m'))
+            );
+        }
+
+        $this->syncEntitlementFromFee((int) $data['student_id'], (int) $data['fee_id']);
+
+        $this->db->query(
+            "INSERT INTO transactions (type, amount, reference_type, reference_id, description, transaction_date, recorded_by)
+             VALUES ('income', :amount, 'payment', :refId, :desc, CURDATE(), :uid)",
+            [
+                'amount'  => $data['amount_paid'],
+                'refId'   => $paymentId,
+                'desc'    => 'Fee Payment - ' . $receiptNo,
+                'uid'     => $data['recorded_by'],
+            ]
+        );
+
+        return $paymentId;
+    }
+
+    /**
      * Record a new payment.
      *
      * Optional keys: billing_charge_id (links warden-issued slip), skip_billing_resolve (bool).
@@ -25,65 +88,67 @@ class Payment
     {
         try {
             $this->db->beginTransaction();
-
-            $receiptNo = $this->generateReceiptNo();
-            $billingChargeId = isset($data['billing_charge_id']) ? (int) $data['billing_charge_id'] : 0;
-            if ($billingChargeId <= 0) {
-                $billingChargeId = null;
-            }
-
-            $this->db->query(
-                "INSERT INTO payments (student_id, fee_id, amount_paid, payment_date, receipt_no, payment_method, recorded_by, month_year, notes, billing_charge_id)
-                 VALUES (:student_id, :fee_id, :amount_paid, :payment_date, :receipt_no, :method, :recorded_by, :month_year, :notes, :billing_charge_id)",
-                [
-                    'student_id'        => $data['student_id'],
-                    'fee_id'            => $data['fee_id'],
-                    'amount_paid'       => $data['amount_paid'],
-                    'payment_date'      => $data['payment_date'] ?? date('Y-m-d'),
-                    'receipt_no'        => $receiptNo,
-                    'method'            => $data['payment_method'] ?? 'cash',
-                    'recorded_by'       => $data['recorded_by'],
-                    'month_year'        => $data['month_year'] ?? date('Y-m'),
-                    'notes'             => $data['notes'] ?? null,
-                    'billing_charge_id' => $billingChargeId,
-                ]
-            );
-            $paymentId = (int) $this->db->lastInsertId();
-
-            if ($billingChargeId !== null) {
-                $this->db->query(
-                    "UPDATE billing_charges SET status = 'paid', payment_id = :pid
-                     WHERE id = :cid AND student_id = :sid AND status = 'pending'",
-                    ['pid' => $paymentId, 'cid' => $billingChargeId, 'sid' => $data['student_id']]
-                );
-            } elseif (empty($data['skip_billing_resolve'])) {
-                $this->resolvePendingBillingCharge(
-                    $paymentId,
-                    (int) $data['student_id'],
-                    (int) $data['fee_id'],
-                    (string) ($data['month_year'] ?? date('Y-m'))
-                );
-            }
-
-            $this->syncEntitlementFromFee((int) $data['student_id'], (int) $data['fee_id']);
-
-            // Link to the transactions table for finance calculation
-            $this->db->query(
-                "INSERT INTO transactions (type, amount, reference_type, reference_id, description, transaction_date, recorded_by)
-                 VALUES ('income', :amount, 'payment', :refId, :desc, CURDATE(), :uid)",
-                [
-                    'amount'  => $data['amount_paid'],
-                    'refId'   => $paymentId,
-                    'desc'    => 'Fee Payment - ' . $receiptNo,
-                    'uid'     => $data['recorded_by'],
-                ]
-            );
-
+            $paymentId = $this->insertPaymentWithLedger($data);
             $this->db->commit();
             return $paymentId;
         } catch (Exception $e) {
             $this->db->rollBack();
             error_log('Payment record error: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Pay every pending warden slip for this student in one transaction (one receipt per slip).
+     *
+     * @return int[] New payment IDs
+     */
+    public function recordAllPendingBillingCharges(int $studentId, int $recordedBy): array
+    {
+        $stmt = $this->db->query(
+            "SELECT id, student_id, fee_id, amount_due, period_month
+             FROM billing_charges
+             WHERE student_id = :sid AND status = 'pending'
+             ORDER BY period_month ASC, id ASC",
+            ['sid' => $studentId]
+        );
+        $charges = $stmt->fetchAll();
+        if ($charges === []) {
+            return [];
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $ids = [];
+            foreach ($charges as $c) {
+                if ((int) $c['student_id'] !== $studentId) {
+                    continue;
+                }
+                $amount = (float) $c['amount_due'];
+                if ($amount <= 0) {
+                    continue;
+                }
+                $ids[] = $this->insertPaymentWithLedger([
+                    'student_id'         => $studentId,
+                    'fee_id'             => (int) $c['fee_id'],
+                    'amount_paid'        => $amount,
+                    'payment_date'       => date('Y-m-d'),
+                    'payment_method'     => 'online',
+                    'recorded_by'        => $recordedBy,
+                    'month_year'         => (string) $c['period_month'],
+                    'notes'              => 'Online portal — pay all, slip #' . (int) $c['id'],
+                    'billing_charge_id'  => (int) $c['id'],
+                ]);
+            }
+            if ($ids === []) {
+                $this->db->rollBack();
+                return [];
+            }
+            $this->db->commit();
+            return $ids;
+        } catch (Exception $e) {
+            $this->db->rollBack();
+            error_log('Payment batch record error: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -285,6 +350,51 @@ class Payment
             ['month_year' => $monthYear]
         );
         return $stmt->fetchAll();
+    }
+
+    /**
+     * Total already paid toward a catalog fee for a calendar billing month (YYYY-MM).
+     * Used to skip or reduce slips when students prepay before the warden issues bills.
+     */
+    public function totalPaidForFeeMonth(int $studentId, int $feeId, string $monthYear): float
+    {
+        if ($studentId <= 0 || $feeId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $monthYear)) {
+            return 0.0;
+        }
+        $stmt = $this->db->query(
+            'SELECT COALESCE(SUM(amount_paid), 0) AS s FROM payments
+             WHERE student_id = :sid AND fee_id = :fid AND month_year = :my',
+            ['sid' => $studentId, 'fid' => $feeId, 'my' => $monthYear]
+        );
+
+        return (float) ($stmt->fetch()['s'] ?? 0);
+    }
+
+    /**
+     * Sum payments for a yearly fee (e.g. annual maintenance) within a calendar year.
+     * Counts rows where month_year is YYYY-* for that year, or payment_date falls in that year
+     * when month_year is missing or not in YYYY-MM form (e.g. transfer fee keys).
+     */
+    public function totalPaidForYearlyFeeInYear(int $studentId, int $feeId, int $year): float
+    {
+        if ($studentId <= 0 || $feeId <= 0 || $year < 2000 || $year > 2100) {
+            return 0.0;
+        }
+        $likeYear = $year . '-%';
+        $stmt = $this->db->query(
+            "SELECT COALESCE(SUM(amount_paid), 0) AS s FROM payments
+             WHERE student_id = :sid AND fee_id = :fid
+             AND (
+               month_year LIKE :likeYear
+               OR (
+                 (month_year IS NULL OR month_year = '' OR month_year NOT REGEXP '^[0-9]{{4}}-[0-9]{{2}}$')
+                 AND YEAR(payment_date) = :y
+               )
+             )",
+            ['sid' => $studentId, 'fid' => $feeId, 'likeYear' => $likeYear, 'y' => $year]
+        );
+
+        return (float) ($stmt->fetch()['s'] ?? 0);
     }
 
     /**
