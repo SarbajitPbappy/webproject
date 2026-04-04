@@ -136,7 +136,7 @@ define('BASE_URL', $computedBaseUrl);
 // Web (Apache) is not CLI, so it keeps using DB_HOST / DB_PORT / DB_* from env.
 $isCli = PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg';
 
-$dbHost = getenv('DB_HOST') ?: 'junction.proxy.rlwy.net';
+$dbHost = getenv('DB_HOST') ?: 'mysql.railway.internal';
 $dbPort = getenv('DB_PORT') ?: '3306';
 $dbName = getenv('DB_NAME') ?: 'railway';
 $dbUser = getenv('DB_USER') ?: 'root';
