@@ -1,12 +1,9 @@
 FROM php:8.2-apache
 
-# Comprehensive MPM Cleanup ("Scorched Earth")
-# This script finds every file in /etc/apache2 and ensures no mpm_ module is loaded as a LoadModule directive
-# before we explicitly enable mpm_prefork.
-RUN find /etc/apache2 -type f -name "*.load" -o -name "*.conf" -o -name "apache2.conf" | \
-    xargs sed -i 's/^LoadModule mpm_/# LoadModule mpm_/g' && \
-    a2dismod mpm_event mpm_worker || true && \
-    a2enmod mpm_prefork || true
+# Single MPM only (prefork + mod_php). Fixes: AH00534 More than one MPM loaded.
+RUN a2dismod mpm_event 2>/dev/null || true \
+    && a2dismod mpm_worker 2>/dev/null || true \
+    && a2enmod mpm_prefork
 
 # Enable URL rewriting for .htaccess routing
 RUN a2enmod rewrite
