@@ -11,4 +11,16 @@ done
 if [ -f /etc/apache2/mods-available/mpm_prefork.load ]; then
   a2enmod mpm_prefork 2>/dev/null || true
 fi
+
+# Railway / Render / Fly: traffic and healthchecks use $PORT. Default Apache is 80 only.
+LISTEN_PORT="${PORT:-80}"
+if [ -f /etc/apache2/ports.conf ]; then
+  sed -i "s/^Listen 80\$/Listen ${LISTEN_PORT}/" /etc/apache2/ports.conf
+  sed -i "s/^Listen 0.0.0.0:80\$/Listen ${LISTEN_PORT}/" /etc/apache2/ports.conf
+fi
+for site in /etc/apache2/sites-enabled/*.conf; do
+  [ -f "$site" ] || continue
+  sed -i "s/<VirtualHost \*:80>/<VirtualHost *:${LISTEN_PORT}>/" "$site"
+done
+
 exec /usr/local/bin/docker-php-entrypoint "$@"
