@@ -164,7 +164,15 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for full behavior of `BASE_URL` and pro
 
 ### Optional: full demo (recommended for presentations)
 
-From the `hostelease` directory, after schema import and `admin_seed.php`:
+**One command** (after `database/hostelease.sql` is imported): runs super admin, safe migrations, then the Bangladesh demo dataset.
+
+```bash
+php database/run_full_demo_seed.php
+```
+
+Re-run the demo seed only (if rows already exist): `php database/run_full_demo_seed.php --force`
+
+Or step by step (same as above):
 
 ```bash
 # In-app notifications (billing alerts, etc.)

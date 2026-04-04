@@ -137,7 +137,7 @@ define('BASE_URL', $computedBaseUrl);
 $isCli = PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg';
 
 $dbHost = getenv('DB_HOST') ?: 'junction.proxy.rlwy.net';
-$dbPort = getenv('DB_PORT') ?: '33279';
+$dbPort = getenv('DB_PORT') ?: '3306';
 $dbName = getenv('DB_NAME') ?: 'railway';
 $dbUser = getenv('DB_USER') ?: 'root';
 $dbPass = getenv('DB_PASS') ?: '';
