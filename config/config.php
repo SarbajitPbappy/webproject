@@ -112,7 +112,13 @@ $isLocalhostBase =
     str_contains($baseUrlEnv, '0.0.0.0');
 
 if (!empty($baseUrlEnv) && !(APP_ENV !== 'development' && $isLocalhostBase)) {
-    $computedBaseUrl = rtrim($baseUrlEnv, '/') . '/';
+    $b = trim($baseUrlEnv);
+    // Host-only values (e.g. app.up.railway.app) are treated as *relative paths* in HTML,
+    // which stacks on every click (…/host/host/…). Always store an absolute URL.
+    if (!preg_match('#^https?://#i', $b)) {
+        $b = ($isLocalhostBase ? 'http://' : 'https://') . ltrim($b, '/');
+    }
+    $computedBaseUrl = rtrim($b, '/') . '/';
 } else {
     $forwardedProto = strtolower(trim($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
