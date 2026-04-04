@@ -6,7 +6,10 @@
             <h2 class="mb-1">Room Allocations</h2>
             <p class="text-muted mb-0">Assign students to rooms, manage transfers and vacating</p>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="<?php echo BASE_URL; ?>?url=allocations/occupancy" class="btn btn-outline-secondary">
+                <i class="bi bi-people me-1"></i>Room roster
+            </a>
             <a href="<?php echo BASE_URL; ?>?url=allocations/transfer" class="btn btn-outline-info">
                 <i class="bi bi-arrow-left-right me-1"></i>Transfer
             </a>
@@ -24,23 +27,28 @@
         <div class="card card-glass">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>New Allocation</h5></div>
             <div class="card-body">
+                <p class="small text-muted mb-3">Students may only be placed in rooms that match their <strong>paid room tier</strong> (set when they pay the correct room rent fee).</p>
+                <div id="tierHint" class="alert alert-secondary py-2 small d-none mb-3"></div>
                 <form method="POST" action="<?php echo BASE_URL; ?>?url=allocations/allocate" novalidate>
                     <?php echo csrfField(); ?>
                     <div class="mb-3">
                         <label for="student_id" class="form-label">Student <span class="text-danger">*</span></label>
                         <select class="form-select" id="student_id" name="student_id" required>
-                            <option value="">Select Student...</option>
+                            <option value="" data-tier="">Select Student...</option>
                             <?php foreach ($students as $s): ?>
-                            <option value="<?php echo $s['id']; ?>"><?php echo e($s['full_name']); ?> (<?php echo e($s['student_id_no']); ?>)</option>
+                            <option value="<?php echo $s['id']; ?>" data-tier="<?php echo e($s['entitled_room_type'] ?? ''); ?>">
+                                <?php echo e($s['full_name']); ?> (<?php echo e($s['student_id_no']); ?>)
+                                <?php if (!empty($s['entitled_room_type'])): ?> — tier <?php echo e($s['entitled_room_type']); ?><?php endif; ?>
+                            </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="mb-3">
                         <label for="room_id" class="form-label">Room <span class="text-danger">*</span></label>
                         <select class="form-select" id="room_id" name="room_id" required>
-                            <option value="">Select Available Room...</option>
+                            <option value="" data-room-type="">Select Available Room...</option>
                             <?php foreach ($rooms as $r): ?>
-                            <option value="<?php echo $r['id']; ?>">
+                            <option value="<?php echo $r['id']; ?>" data-room-type="<?php echo e($r['type']); ?>">
                                 <?php echo e($r['room_number']); ?> — <?php echo ucfirst(e($r['type'])); ?>
                                 (<?php echo $r['current_occupancy']; ?>/<?php echo $r['capacity']; ?>)
                             </option>
@@ -74,7 +82,9 @@
                     <div class="list-group-item d-flex justify-content-between align-items-center">
                         <div>
                             <strong><?php echo e($w['full_name']); ?></strong>
-                            <br><small class="text-muted"><?php echo e($w['student_id_no']); ?> · Since <?php echo date('M d', strtotime($w['requested_at'])); ?></small>
+                            <br><small class="text-muted"><?php echo e($w['student_id_no']); ?> ·
+                                Tier <?php echo e($w['preferred_room_type'] ?? $w['entitled_room_type'] ?? '—'); ?>
+                                · Since <?php echo date('M d', strtotime($w['requested_at'])); ?></small>
                         </div>
                         <span class="badge bg-warning-subtle text-warning">Waiting</span>
                     </div>
@@ -96,6 +106,7 @@
                             <tr>
                                 <th>Student</th>
                                 <th>Room</th>
+                                <th>Type</th>
                                 <th>Start Date</th>
                                 <th>Status</th>
                                 <th class="text-end">Actions</th>
@@ -111,6 +122,7 @@
                                     <br><small class="text-muted"><?php echo e($a['student_id_no']); ?></small>
                                 </td>
                                 <td><span class="badge bg-info-subtle text-info"><?php echo e($a['room_number']); ?></span></td>
+                                <td><small><?php echo ucfirst(e($a['room_type'] ?? '')); ?></small></td>
                                 <td><?php echo date('M d, Y', strtotime($a['start_date'])); ?></td>
                                 <td><span class="badge bg-success-subtle text-success">Active</span></td>
                                 <td class="text-end">
@@ -137,4 +149,34 @@
     </div>
 </div>
 
-<?php $extraScripts = '<script>$(function(){ if($.fn.DataTable) $("#allocationsTable").DataTable({pageLength:10,order:[[2,"desc"]]}); });</script>'; ?>
+<?php
+$extraScripts = <<<'JS'
+<script>
+(function(){
+  const st = document.getElementById('student_id');
+  const rm = document.getElementById('room_id');
+  const hint = document.getElementById('tierHint');
+  function tier() { return (st.options[st.selectedIndex] && st.options[st.selectedIndex].getAttribute('data-tier')) || ''; }
+  function filterRooms() {
+    const t = tier();
+    if (!rm) return;
+    for (let i = 0; i < rm.options.length; i++) {
+      const opt = rm.options[i];
+      if (!opt.value) { opt.hidden = false; continue; }
+      const rt = opt.getAttribute('data-room-type') || '';
+      opt.hidden = t && rt && t !== rt;
+    }
+    if (hint) {
+      if (!t) { hint.classList.add('d-none'); }
+      else {
+        hint.classList.remove('d-none');
+        hint.textContent = 'Showing only ' + t + ' rooms for this student. Server-side checks still apply.';
+      }
+    }
+  }
+  if (st) st.addEventListener('change', filterRooms);
+  filterRooms();
+})();
+</script>
+<script>$(function(){ if($.fn.DataTable) $("#allocationsTable").DataTable({pageLength:10,order:[[3,"desc"]]}); });</script>
+JS;

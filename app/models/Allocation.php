@@ -143,7 +143,7 @@ class Allocation
     public function all(): array
     {
         $stmt = $this->db->query(
-            "SELECT a.*, r.room_number, r.floor, s.student_id_no, u.full_name,
+            "SELECT a.*, r.room_number, r.floor, r.type AS room_type, s.student_id_no, u.full_name,
                     alloc_user.full_name as allocated_by_name
              FROM allocations a
              JOIN rooms r ON a.room_id = r.id
@@ -183,17 +183,36 @@ class Allocation
     /**
      * Add student to waitlist.
      */
-    public function waitlistAdd(int $studentId): int
+    public function waitlistAdd(int $studentId, ?string $preferredRoomType = null): int
     {
         $this->db->query(
-            "INSERT INTO waitlist (student_id, status) VALUES (:student_id, 'waiting')",
-            ['student_id' => $studentId]
+            "INSERT INTO waitlist (student_id, preferred_room_type, status) VALUES (:student_id, :prt, 'waiting')",
+            ['student_id' => $studentId, 'prt' => $preferredRoomType]
         );
         return (int) $this->db->lastInsertId();
     }
 
     /**
-     * Get next student from waitlist.
+     * Next waitlisted student who is eligible for a room of this type (paid tier or queue preference).
+     */
+    public function waitlistNextForRoomType(string $roomType): array|false
+    {
+        $stmt = $this->db->query(
+            "SELECT w.*, u.full_name, s.student_id_no, s.entitled_room_type
+             FROM waitlist w
+             JOIN students s ON w.student_id = s.id
+             JOIN users u ON s.user_id = u.id
+             WHERE w.status = 'waiting'
+               AND COALESCE(w.preferred_room_type, s.entitled_room_type) = :rt
+             ORDER BY w.requested_at ASC
+             LIMIT 1",
+            ['rt' => $roomType]
+        );
+        return $stmt->fetch();
+    }
+
+    /**
+     * Get next student from waitlist (any type — prefer waitlistNextForRoomType for auto-allocation).
      */
     public function waitlistNext(): array|false
     {
@@ -215,7 +234,7 @@ class Allocation
     public function waitlistAll(): array
     {
         $stmt = $this->db->query(
-            "SELECT w.*, u.full_name, s.student_id_no
+            "SELECT w.*, u.full_name, s.student_id_no, s.entitled_room_type
              FROM waitlist w
              JOIN students s ON w.student_id = s.id
              JOIN users u ON s.user_id = u.id

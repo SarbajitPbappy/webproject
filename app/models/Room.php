@@ -126,6 +126,45 @@ class Room
     }
 
     /**
+     * Vacant beds for a given room tier (single / double / …).
+     */
+    public function getAvailableByRoomType(string $roomType): array
+    {
+        $stmt = $this->db->query(
+            "SELECT r.*,
+                    (SELECT COUNT(*) FROM allocations a WHERE a.room_id = r.id AND a.status = 'active') as current_occupancy
+             FROM rooms r
+             WHERE r.status = 'available' AND r.type = :rtype
+             HAVING current_occupancy < r.capacity
+             ORDER BY r.floor, r.room_number",
+            ['rtype' => $roomType]
+        );
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Room roster: every room with names of current occupants (for warden portal).
+     */
+    public function getOccupancyBoard(): array
+    {
+        $stmt = $this->db->query(
+            "SELECT r.id, r.room_number, r.floor, r.type, r.capacity, r.status,
+                    (SELECT COUNT(*) FROM allocations a WHERE a.room_id = r.id AND a.status = 'active') AS current_occupancy,
+                    GROUP_CONCAT(
+                        CONCAT(u.full_name, ' (', s.student_id_no, ')')
+                        ORDER BY u.full_name SEPARATOR ' · '
+                    ) AS occupant_labels
+             FROM rooms r
+             LEFT JOIN allocations al ON al.room_id = r.id AND al.status = 'active'
+             LEFT JOIN students s ON al.student_id = s.id
+             LEFT JOIN users u ON s.user_id = u.id
+             GROUP BY r.id, r.room_number, r.floor, r.type, r.capacity, r.status
+             ORDER BY r.floor, r.room_number"
+        );
+        return $stmt->fetchAll();
+    }
+
+    /**
      * Update room status.
      */
     public function updateStatus(int $id, string $status): bool

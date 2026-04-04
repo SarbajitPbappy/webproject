@@ -19,10 +19,12 @@
                 <div class="col-md-6">
                     <label for="student_id" class="form-label">Student <span class="text-danger">*</span></label>
                     <select class="form-select" id="student_id" name="student_id" required>
-                        <option value="">Select Student...</option>
+                        <option value="" data-tier="">Select Student...</option>
                         <?php foreach ($students as $s): ?>
-                        <option value="<?php echo $s['id']; ?>" <?php echo ($s['id'] == ($preSelectedStudentId ?? 0)) ? 'selected' : ''; ?>>
+                        <option value="<?php echo $s['id']; ?>" data-tier="<?php echo e($s['entitled_room_type'] ?? ''); ?>"
+                            <?php echo ($s['id'] == ($preSelectedStudentId ?? 0)) ? 'selected' : ''; ?>>
                             <?php echo e($s['full_name']); ?> (<?php echo e($s['student_id_no']); ?>)
+                            <?php if (!empty($s['entitled_room_type'])): ?> — <?php echo e($s['entitled_room_type']); ?><?php endif; ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
@@ -30,9 +32,11 @@
                 <div class="col-md-6">
                     <label for="room_id" class="form-label">New Room <span class="text-danger">*</span></label>
                     <select class="form-select" id="room_id" name="room_id" required>
-                        <option value="">Select New Room...</option>
+                        <option value="" data-room-type="">Select New Room...</option>
                         <?php foreach ($rooms as $r): ?>
-                        <option value="<?php echo $r['id']; ?>"><?php echo e($r['room_number']); ?> (<?php echo $r['current_occupancy']; ?>/<?php echo $r['capacity']; ?>)</option>
+                        <option value="<?php echo $r['id']; ?>" data-room-type="<?php echo e($r['type']); ?>">
+                            <?php echo e($r['room_number']); ?> — <?php echo ucfirst(e($r['type'])); ?> (<?php echo $r['current_occupancy']; ?>/<?php echo $r['capacity']; ?>)
+                        </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -49,3 +53,21 @@
         </form>
     </div>
 </div>
+<script>
+(function(){
+  const st = document.getElementById('student_id');
+  const rm = document.getElementById('room_id');
+  function tier() { return (st.options[st.selectedIndex] && st.options[st.selectedIndex].getAttribute('data-tier')) || ''; }
+  function filterRooms() {
+    const t = tier();
+    for (let i = 0; i < rm.options.length; i++) {
+      const opt = rm.options[i];
+      if (!opt.value) { opt.hidden = false; continue; }
+      const rt = opt.getAttribute('data-room-type') || '';
+      opt.hidden = t && rt && t !== rt;
+    }
+  }
+  if (st) st.addEventListener('change', filterRooms);
+  filterRooms();
+})();
+</script>

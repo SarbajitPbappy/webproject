@@ -79,6 +79,26 @@ function isActive(string $segment, string $currentUrl): string
                 </a>
             </li>
 
+            <li class="sidebar-menu-item <?php echo isActive('allocations/occupancy', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=allocations/occupancy" class="sidebar-link">
+                    <i class="bi bi-house-door-fill"></i>
+                    <span>Room roster</span>
+                </a>
+            </li>
+
+            <li class="sidebar-menu-item <?php echo isActive('billing', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=billing/issueMonthly" class="sidebar-link">
+                    <i class="bi bi-receipt-cutoff"></i>
+                    <span>Issue monthly bills</span>
+                </a>
+            </li>
+            <li class="sidebar-menu-item <?php echo isActive('billing/issueEnrollment', $currentUrl); ?>">
+                <a href="<?php echo BASE_URL; ?>?url=billing/issueEnrollment" class="sidebar-link">
+                    <i class="bi bi-person-badge"></i>
+                    <span>Enrollment billing</span>
+                </a>
+            </li>
+
             <!-- Payments -->
             <li class="sidebar-menu-item <?php echo isActive('payments', $currentUrl); ?>">
                 <a href="<?php echo BASE_URL; ?>?url=payments/index" class="sidebar-link">

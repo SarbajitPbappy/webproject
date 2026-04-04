@@ -10,6 +10,7 @@ require_once APP_ROOT . '/app/models/Complaint.php';
 require_once APP_ROOT . '/app/models/Notice.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
 require_once APP_ROOT . '/app/models/Allocation.php';
+require_once APP_ROOT . '/app/models/BillingCharge.php';
 
 class AdminController
 {
@@ -56,15 +57,18 @@ class AdminController
         $totalBalance = $totalIncome - $totalExpense;
 
         // KPIs
+        $billingModel = new BillingCharge();
+
         $kpi = [
-            'total_students'    => $studentModel->count(),
-            'active_students'   => $studentModel->count('active'),
-            'total_rooms'       => $roomModel->count(),
-            'occupancy'         => $roomModel->getOccupancyStats(),
-            'outstanding_count' => $paymentModel->outstandingCount(),
-            'open_complaints'   => $complaintModel->countOpen(),
-            'total_balance'     => $totalBalance, // Changed from total_revenue
-            'monthly_revenue'   => $paymentModel->totalRevenue(date('Y-m-01'), date('Y-m-t')),
+            'total_students'           => $studentModel->count(),
+            'active_students'          => $studentModel->count('active'),
+            'total_rooms'              => $roomModel->count(),
+            'occupancy'                => $roomModel->getOccupancyStats(),
+            'outstanding_count'        => $paymentModel->outstandingCount(),
+            'pending_billing_lines'    => $billingModel->countPendingGlobally(),
+            'open_complaints'          => $complaintModel->countOpen(),
+            'total_balance'            => $totalBalance,
+            'monthly_revenue'          => $paymentModel->totalRevenue(date('Y-m-01'), date('Y-m-t')),
         ];
 
         $recentActivity = AuditLog::recent(8);
@@ -89,9 +93,12 @@ class AdminController
         $complaintModel = new Complaint();
         $noticeModel = new Notice();
 
+        $billingModel = new BillingCharge();
+
         $student = $studentModel->findByUserId($_SESSION['user_id']);
         $allocation = $student ? $allocationModel->findActiveByStudent($student['id']) : null;
         $payments = $student ? $paymentModel->findByStudent($student['id']) : [];
+        $billingPending = $student ? $billingModel->pendingForStudent((int) $student['id']) : [];
         $complaints = $student ? $complaintModel->findByStudent($student['id']) : [];
         $notices = $noticeModel->getRecent(5);
 

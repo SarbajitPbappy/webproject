@@ -20,6 +20,7 @@ try {
     $db->query("TRUNCATE TABLE notices");
     $db->query("TRUNCATE TABLE complaints");
     $db->query("TRUNCATE TABLE payments");
+    $db->query("TRUNCATE TABLE billing_charges");
     $db->query("TRUNCATE TABLE fee_structures");
     $db->query("TRUNCATE TABLE allocations");
     $db->query("TRUNCATE TABLE waitlist");
@@ -80,18 +81,18 @@ try {
                 ':ty'  => $type,
                 ':cap' => $cap
             ]);
-            $roomIds[] = ['id' => $db->lastInsertId(), 'cap' => $cap, 'occ' => 0];
+            $roomIds[] = ['id' => $db->lastInsertId(), 'cap' => $cap, 'occ' => 0, 'type' => $type];
         }
     }
     echo "Rooms created.\n";
 
-    // 6. Create Fee Structures
-    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active) VALUES ('Monthly Rent (Single)', 5000.00, 'monthly', 1)");
-    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active) VALUES ('Monthly Rent (Double)', 3500.00, 'monthly', 1)");
+    // 6. Create Fee Structures (categories + room tier mapping)
+    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active, fee_category, maps_room_type) VALUES ('Monthly Rent (Single)', 5000.00, 'monthly', 1, 'room_rent', 'single')");
+    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active, fee_category, maps_room_type) VALUES ('Monthly Rent (Double)', 3500.00, 'monthly', 1, 'room_rent', 'double')");
     $feeId1 = $db->lastInsertId();
-    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active) VALUES ('Security Deposit', 10000.00, 'one_time', 1)");
-    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active) VALUES ('Dining Fee', 4000.00, 'monthly', 1)");
-    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active) VALUES ('Late Fine', 500.00, 'one_time', 1)");
+    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active, fee_category, maps_room_type) VALUES ('Security Deposit', 10000.00, 'one_time', 1, 'security_deposit', NULL)");
+    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active, fee_category, maps_room_type) VALUES ('Dining Fee', 4000.00, 'monthly', 1, 'meal', NULL)");
+    $db->query("INSERT INTO fee_structures (name, amount, frequency, is_active, fee_category, maps_room_type) VALUES ('Late Fine', 500.00, 'one_time', 1, 'other', NULL)");
     echo "Fee structures created.\n";
 
     // 7. Create 100 Students and allocate to rooms randomly
@@ -126,6 +127,10 @@ try {
                     ':rid' => $r['id'],
                     ':sd'  => date('Y-m-d', strtotime('-' . rand(1, 100) . ' days'))
                 ]);
+                $db->query(
+                    "UPDATE students SET entitled_room_type = :t WHERE id = :sid",
+                    [':t' => $r['type'], ':sid' => $sid]
+                );
                 $r['occ']++;
                 $db->query("UPDATE rooms SET status = :st WHERE id = :rid", [
                     ':st'  => ($r['occ'] == $r['cap']) ? 'full' : 'available',

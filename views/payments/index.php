@@ -47,6 +47,22 @@ $role = currentUser()['role'] ?? '';
     </div>
 </div>
 
+<?php if (!empty($billingPending) && in_array($role, ['student', 'staff'], true)): ?>
+<div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <div>
+        <strong>Outstanding bills</strong> — you have <?php echo count($billingPending); ?> unpaid slip(s).
+        <?php
+        $sum = 0;
+        foreach ($billingPending as $bp) {
+            $sum += (float) $bp['amount_due'];
+        }
+        ?>
+        Total due: <strong>৳<?php echo number_format($sum, 2); ?></strong>
+    </div>
+    <a href="<?php echo BASE_URL; ?>?url=payments/makePayment" class="btn btn-sm btn-primary">Pay online</a>
+</div>
+<?php endif; ?>
+
 <!-- Payments Table -->
 <div class="card card-glass">
     <div class="card-body">

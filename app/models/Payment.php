@@ -18,6 +18,8 @@ class Payment
 
     /**
      * Record a new payment.
+     *
+     * Optional keys: billing_charge_id (links warden-issued slip), skip_billing_resolve (bool).
      */
     public function record(array $data): int
     {
@@ -25,23 +27,45 @@ class Payment
             $this->db->beginTransaction();
 
             $receiptNo = $this->generateReceiptNo();
+            $billingChargeId = isset($data['billing_charge_id']) ? (int) $data['billing_charge_id'] : 0;
+            if ($billingChargeId <= 0) {
+                $billingChargeId = null;
+            }
 
             $this->db->query(
-                "INSERT INTO payments (student_id, fee_id, amount_paid, payment_date, receipt_no, payment_method, recorded_by, month_year, notes)
-                 VALUES (:student_id, :fee_id, :amount_paid, :payment_date, :receipt_no, :method, :recorded_by, :month_year, :notes)",
+                "INSERT INTO payments (student_id, fee_id, amount_paid, payment_date, receipt_no, payment_method, recorded_by, month_year, notes, billing_charge_id)
+                 VALUES (:student_id, :fee_id, :amount_paid, :payment_date, :receipt_no, :method, :recorded_by, :month_year, :notes, :billing_charge_id)",
                 [
-                    'student_id'   => $data['student_id'],
-                    'fee_id'       => $data['fee_id'],
-                    'amount_paid'  => $data['amount_paid'],
-                    'payment_date' => $data['payment_date'] ?? date('Y-m-d'),
-                    'receipt_no'   => $receiptNo,
-                    'method'       => $data['payment_method'] ?? 'cash',
-                    'recorded_by'  => $data['recorded_by'],
-                    'month_year'   => $data['month_year'] ?? date('Y-m'),
-                    'notes'        => $data['notes'] ?? null,
+                    'student_id'        => $data['student_id'],
+                    'fee_id'            => $data['fee_id'],
+                    'amount_paid'       => $data['amount_paid'],
+                    'payment_date'      => $data['payment_date'] ?? date('Y-m-d'),
+                    'receipt_no'        => $receiptNo,
+                    'method'            => $data['payment_method'] ?? 'cash',
+                    'recorded_by'       => $data['recorded_by'],
+                    'month_year'        => $data['month_year'] ?? date('Y-m'),
+                    'notes'             => $data['notes'] ?? null,
+                    'billing_charge_id' => $billingChargeId,
                 ]
             );
             $paymentId = (int) $this->db->lastInsertId();
+
+            if ($billingChargeId !== null) {
+                $this->db->query(
+                    "UPDATE billing_charges SET status = 'paid', payment_id = :pid
+                     WHERE id = :cid AND student_id = :sid AND status = 'pending'",
+                    ['pid' => $paymentId, 'cid' => $billingChargeId, 'sid' => $data['student_id']]
+                );
+            } elseif (empty($data['skip_billing_resolve'])) {
+                $this->resolvePendingBillingCharge(
+                    $paymentId,
+                    (int) $data['student_id'],
+                    (int) $data['fee_id'],
+                    (string) ($data['month_year'] ?? date('Y-m'))
+                );
+            }
+
+            $this->syncEntitlementFromFee((int) $data['student_id'], (int) $data['fee_id']);
 
             // Link to the transactions table for finance calculation
             $this->db->query(
@@ -51,7 +75,7 @@ class Payment
                     'amount'  => $data['amount_paid'],
                     'refId'   => $paymentId,
                     'desc'    => 'Fee Payment - ' . $receiptNo,
-                    'uid'     => $data['recorded_by']
+                    'uid'     => $data['recorded_by'],
                 ]
             );
 
@@ -62,6 +86,54 @@ class Payment
             error_log('Payment record error: ' . $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Match an admin-recorded payment to a pending warden slip when not paying from the portal.
+     */
+    private function resolvePendingBillingCharge(
+        int $paymentId,
+        int $studentId,
+        int $feeId,
+        string $periodMonth
+    ): void {
+        $stmt = $this->db->query(
+            "SELECT id FROM billing_charges
+             WHERE student_id = :sid AND fee_id = :fid AND period_month = :pm AND status = 'pending'
+             ORDER BY id ASC LIMIT 1",
+            ['sid' => $studentId, 'fid' => $feeId, 'pm' => $periodMonth]
+        );
+        $row = $stmt->fetch();
+        if (!$row) {
+            return;
+        }
+        $this->db->query(
+            "UPDATE billing_charges SET status = 'paid', payment_id = :pid WHERE id = :id",
+            ['pid' => $paymentId, 'id' => (int) $row['id']]
+        );
+        $this->db->query(
+            "UPDATE payments SET billing_charge_id = :cid WHERE id = :pid",
+            ['cid' => (int) $row['id'], 'pid' => $paymentId]
+        );
+    }
+
+    /**
+     * When a room-rent fee with maps_room_type is paid, lock the student's allocatable room tier.
+     */
+    public function syncEntitlementFromFee(int $studentId, int $feeId): void
+    {
+        $stmt = $this->db->query(
+            "SELECT maps_room_type, fee_category FROM fee_structures WHERE id = :id LIMIT 1",
+            ['id' => $feeId]
+        );
+        $fee = $stmt->fetch();
+        if (!$fee || ($fee['fee_category'] ?? '') !== 'room_rent' || empty($fee['maps_room_type'])) {
+            return;
+        }
+        $this->db->query(
+            "UPDATE students SET entitled_room_type = :t WHERE id = :sid",
+            ['t' => $fee['maps_room_type'], 'sid' => $studentId]
+        );
     }
 
     /**
@@ -123,25 +195,16 @@ class Payment
     }
 
     /**
-     * Calculate total due for a student.
-     * Simple logic: Sum of all active monthly fees - total paid this month.
+     * Total ৳ pending from warden-issued billing slips (students pay only against these online).
      */
     public function calculateStudentDue(int $studentId): float
     {
-        $monthYear = date('Y-m');
-        
-        // Get total expected monthly fees
-        $stmt = $this->db->query("SELECT SUM(amount) as total FROM fee_structures WHERE is_active = TRUE AND frequency = 'monthly'");
-        $expected = (float) ($stmt->fetch()['total'] ?? 0);
-        
-        // Get total paid for this month
         $stmt = $this->db->query(
-            "SELECT SUM(amount_paid) as paid FROM payments WHERE student_id = :sid AND month_year = :my",
-            ['sid' => $studentId, 'my' => $monthYear]
+            "SELECT COALESCE(SUM(amount_due), 0) AS s FROM billing_charges
+             WHERE student_id = :sid AND status = 'pending'",
+            ['sid' => $studentId]
         );
-        $paid = (float) ($stmt->fetch()['paid'] ?? 0);
-        
-        return max(0, $expected - $paid);
+        return max(0, (float) ($stmt->fetch()['s'] ?? 0));
     }
 
     /**
@@ -230,28 +293,54 @@ class Payment
     public function getFeeStructures(): array
     {
         $stmt = $this->db->query(
-            "SELECT * FROM fee_structures WHERE is_active = TRUE ORDER BY name"
+            "SELECT * FROM fee_structures WHERE is_active = TRUE ORDER BY fee_category, name"
         );
         return $stmt->fetchAll();
     }
 
     /**
-     * Get total outstanding (students who haven't paid for current month).
+     * Fees that can be bulk-issued for a billing month (excludes ad-hoc categories if needed).
+     */
+    public function getFeesForMonthlyIssue(): array
+    {
+        $stmt = $this->db->query(
+            "SELECT * FROM fee_structures WHERE is_active = TRUE
+             AND frequency IN ('monthly','yearly')
+             AND fee_category IN ('room_rent','meal','utility','service','other')
+             ORDER BY fee_category, name"
+        );
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Enrollment-related fees (security deposit + room tier rent).
+     */
+    public function getFeesForEnrollmentIssue(): array
+    {
+        $stmt = $this->db->query(
+            "SELECT * FROM fee_structures WHERE is_active = TRUE
+             AND fee_category IN ('security_deposit','room_rent')
+             ORDER BY fee_category, name"
+        );
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Students with at least one unpaid warden-issued slip (optional filter by billing month).
      */
     public function outstandingCount(string $monthYear = ''): int
     {
-        if (empty($monthYear)) $monthYear = date('Y-m');
-
-        $stmt = $this->db->query(
-            "SELECT COUNT(DISTINCT s.id) as total
-             FROM students s
-             JOIN users u ON s.user_id = u.id
-             WHERE u.status = 'active'
-             AND s.id NOT IN (
-                 SELECT DISTINCT student_id FROM payments WHERE month_year = :my
-             )",
-            ['my' => $monthYear]
-        );
+        if ($monthYear !== '') {
+            $stmt = $this->db->query(
+                "SELECT COUNT(DISTINCT student_id) AS total FROM billing_charges
+                 WHERE status = 'pending' AND period_month = :m",
+                ['m' => $monthYear]
+            );
+        } else {
+            $stmt = $this->db->query(
+                "SELECT COUNT(DISTINCT student_id) AS total FROM billing_charges WHERE status = 'pending'"
+            );
+        }
         return (int) $stmt->fetch()['total'];
     }
 

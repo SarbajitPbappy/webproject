@@ -49,8 +49,10 @@ CREATE TABLE `students` (
   `guardian_name`   VARCHAR(100) DEFAULT NULL,
   `guardian_phone`  VARCHAR(20) DEFAULT NULL,
   `nid_or_card`     VARCHAR(255) DEFAULT NULL,
-  `enrolled_date`   DATE DEFAULT NULL,
-  `checkout_date`   DATE DEFAULT NULL,
+  `enrolled_date`       DATE DEFAULT NULL,
+  `checkout_date`       DATE DEFAULT NULL,
+  `entitled_room_type` ENUM('single','double','triple','dormitory') DEFAULT NULL
+    COMMENT 'Room tier paid for; allocation must match',
   UNIQUE KEY `uk_students_user_id` (`user_id`),
   UNIQUE KEY `uk_students_id_no` (`student_id_no`),
   INDEX `idx_students_enrolled` (`enrolled_date`),
@@ -106,9 +108,10 @@ CREATE TABLE `allocations` (
 -- Queue for students waiting for room allocation.
 -- =====================================================================
 CREATE TABLE `waitlist` (
-  `id`           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `student_id`   INT UNSIGNED NOT NULL,
-  `requested_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id`                   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `student_id`           INT UNSIGNED NOT NULL,
+  `preferred_room_type`  ENUM('single','double','triple','dormitory') DEFAULT NULL,
+  `requested_at`         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `status`       ENUM('waiting','allocated','cancelled') NOT NULL DEFAULT 'waiting',
   INDEX `idx_waitlist_status` (`status`),
   CONSTRAINT `fk_waitlist_student` FOREIGN KEY (`student_id`)
@@ -120,13 +123,17 @@ CREATE TABLE `waitlist` (
 -- Defines various fee types (rent, utility, laundry, etc.).
 -- =====================================================================
 CREATE TABLE `fee_structures` (
-  `id`          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `name`        VARCHAR(100) NOT NULL,
-  `amount`      DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-  `frequency`   ENUM('monthly','one_time','yearly') NOT NULL DEFAULT 'monthly',
-  `is_active`   BOOLEAN NOT NULL DEFAULT TRUE,
-  `created_at`  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_fees_active` (`is_active`)
+  `id`             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `name`           VARCHAR(100) NOT NULL,
+  `amount`         DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `frequency`      ENUM('monthly','one_time','yearly') NOT NULL DEFAULT 'monthly',
+  `is_active`      BOOLEAN NOT NULL DEFAULT TRUE,
+  `fee_category`   ENUM('room_rent','security_deposit','meal','utility','service','other') NOT NULL DEFAULT 'other',
+  `maps_room_type` ENUM('single','double','triple','dormitory') DEFAULT NULL
+    COMMENT 'For room_rent: which tier payment unlocks',
+  `created_at`     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_fees_active` (`is_active`),
+  INDEX `idx_fees_category` (`fee_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
@@ -142,11 +149,13 @@ CREATE TABLE `payments` (
   `receipt_no`     VARCHAR(50) NOT NULL,
   `payment_method` ENUM('cash','bank','online') NOT NULL DEFAULT 'cash',
   `recorded_by`    INT UNSIGNED DEFAULT NULL,
-  `month_year`     VARCHAR(10) DEFAULT NULL,
-  `notes`          TEXT DEFAULT NULL,
-  `created_at`     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `month_year`         VARCHAR(10) DEFAULT NULL,
+  `notes`              TEXT DEFAULT NULL,
+  `billing_charge_id`  INT UNSIGNED DEFAULT NULL,
+  `created_at`         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uk_payments_receipt` (`receipt_no`),
   INDEX `idx_payments_student` (`student_id`),
+  INDEX `idx_payments_billing_charge` (`billing_charge_id`),
   INDEX `idx_payments_date` (`payment_date`),
   INDEX `idx_payments_month` (`month_year`),
   CONSTRAINT `fk_payments_student` FOREIGN KEY (`student_id`)
@@ -154,6 +163,33 @@ CREATE TABLE `payments` (
   CONSTRAINT `fk_payments_fee` FOREIGN KEY (`fee_id`)
     REFERENCES `fee_structures`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_payments_recorder` FOREIGN KEY (`recorded_by`)
+    REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- TABLE: billing_charges
+-- Warden-issued slips (monthly meal/utilities/rent, enrollment, etc.)
+-- =====================================================================
+CREATE TABLE `billing_charges` (
+  `id`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `student_id`    INT UNSIGNED NOT NULL,
+  `fee_id`        INT UNSIGNED NOT NULL,
+  `period_month`  VARCHAR(7) NOT NULL COMMENT 'YYYY-MM',
+  `amount_due`    DECIMAL(10,2) NOT NULL,
+  `status`        ENUM('pending','paid','waived') NOT NULL DEFAULT 'pending',
+  `issued_by`     INT UNSIGNED DEFAULT NULL,
+  `issued_at`     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `payment_id`    INT UNSIGNED DEFAULT NULL,
+  `notes`         TEXT DEFAULT NULL,
+  UNIQUE KEY `uk_bill_student_fee_period` (`student_id`,`fee_id`,`period_month`),
+  INDEX `idx_bill_student_status` (`student_id`,`status`),
+  INDEX `idx_bill_period` (`period_month`),
+  INDEX `idx_bill_payment` (`payment_id`),
+  CONSTRAINT `fk_bill_student` FOREIGN KEY (`student_id`)
+    REFERENCES `students`(`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_bill_fee` FOREIGN KEY (`fee_id`)
+    REFERENCES `fee_structures`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_bill_issuer` FOREIGN KEY (`issued_by`)
     REFERENCES `users`(`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -251,12 +287,16 @@ CREATE TABLE `login_attempts` (
 -- =====================================================================
 -- Default Fee Structures
 -- =====================================================================
-INSERT INTO `fee_structures` (`name`, `amount`, `frequency`, `is_active`) VALUES
-('Monthly Rent', 5000.00, 'monthly', TRUE),
-('Utility Charge', 500.00, 'monthly', TRUE),
-('Laundry Service', 300.00, 'monthly', TRUE),
-('Security Deposit', 10000.00, 'one_time', TRUE),
-('Annual Maintenance', 2000.00, 'yearly', TRUE);
+INSERT INTO `fee_structures` (`name`, `amount`, `frequency`, `is_active`, `fee_category`, `maps_room_type`) VALUES
+('Room Rent (Single)', 5000.00, 'monthly', TRUE, 'room_rent', 'single'),
+('Room Rent (Double)', 3500.00, 'monthly', TRUE, 'room_rent', 'double'),
+('Room Rent (Triple)', 3000.00, 'monthly', TRUE, 'room_rent', 'triple'),
+('Room Rent (Dormitory)', 2000.00, 'monthly', TRUE, 'room_rent', 'dormitory'),
+('Security Deposit', 10000.00, 'one_time', TRUE, 'security_deposit', NULL),
+('Dining / Meal Plan', 4000.00, 'monthly', TRUE, 'meal', NULL),
+('Utility Charge', 500.00, 'monthly', TRUE, 'utility', NULL),
+('Laundry Service', 300.00, 'monthly', TRUE, 'service', NULL),
+('Annual Maintenance', 2000.00, 'yearly', TRUE, 'other', NULL);
 
 -- =====================================================================
 -- TABLE: transactions

@@ -51,6 +51,7 @@ $controllerMap = [
     'Profile'    => 'ProfileController',
     'Payroll'    => 'PayrollController',
     'Finances'   => 'FinanceController', 'Finance' => 'FinanceController',
+    'Billing'    => 'BillingController',
 ];
 
 // ─── Default route: redirect logged-in users to dashboard ───────────

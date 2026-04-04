@@ -42,6 +42,24 @@
         </div>
     </div>
 
+    <?php if (!empty($billingPending)): ?>
+    <div class="col-12">
+        <div class="alert alert-warning d-flex flex-wrap justify-content-between align-items-center gap-2 mb-0">
+            <div>
+                <strong>Bills to pay</strong> — <?php echo count($billingPending); ?> slip(s) waiting.
+                <?php
+                $t = 0;
+                foreach ($billingPending as $bp) {
+                    $t += (float) $bp['amount_due'];
+                }
+                ?>
+                Total <strong>৳<?php echo number_format($t, 2); ?></strong>
+            </div>
+            <a href="<?php echo BASE_URL; ?>?url=payments/makePayment" class="btn btn-sm btn-dark">Pay now</a>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Recent Payments -->
     <div class="col-md-6">
         <div class="card card-glass">

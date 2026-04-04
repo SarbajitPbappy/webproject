@@ -25,6 +25,41 @@ class AllocationController
     }
 
     /**
+     * Ensure paid room tier matches physical room type.
+     */
+    private function allocationTierError(int $studentId, array $room): ?string
+    {
+        $student = $this->studentModel->find($studentId);
+        if (!$student) {
+            return 'Student not found.';
+        }
+        if (empty($student['entitled_room_type'])) {
+            return 'Student has no paid room tier. Issue enrollment billing (security deposit + correct room rent) or record a matching room rent payment before allocating.';
+        }
+        if ($student['entitled_room_type'] !== $room['type']) {
+            return 'Room type mismatch: this student paid for '
+                . $student['entitled_room_type'] . ' but the selected room is ' . $room['type'] . '. Choose a matching room or add them to the waitlist.';
+        }
+        return null;
+    }
+
+    /**
+     * Room roster for wardens / super admin.
+     */
+    public function occupancy(): void
+    {
+        requireRole(['super_admin', 'admin']);
+
+        $board = $this->roomModel->getOccupancyBoard();
+        $pageTitle = 'Room roster';
+
+        ob_start();
+        require_once APP_ROOT . '/views/rooms/occupancy.php';
+        $viewContent = ob_get_clean();
+        require_once APP_ROOT . '/views/layouts/main.php';
+    }
+
+    /**
      * List all allocations.
      */
     public function index(): void
@@ -68,21 +103,32 @@ class AllocationController
                 if (!$studentId) $errors[] = 'Please select a student.';
                 if (!$roomId) $errors[] = 'Please select a room.';
 
+                $roomRow = $roomId ? $this->roomModel->findById($roomId) : null;
+                if ($roomId && !$roomRow) {
+                    $errors[] = 'Invalid room selected.';
+                }
+
                 // Check if student already has active allocation
                 if ($studentId && $this->allocationModel->findActiveByStudent($studentId)) {
                     $errors[] = 'This student already has an active room allocation. Transfer or vacate first.';
                 }
 
+                if ($studentId && $roomRow && empty($errors)) {
+                    $tierErr = $this->allocationTierError($studentId, $roomRow);
+                    if ($tierErr !== null) {
+                        $errors[] = $tierErr;
+                    }
+                }
+
                 // Check room availability
-                if ($roomId && empty($errors)) {
+                if ($roomId && $roomRow && empty($errors)) {
                     $availability = $this->allocationModel->checkAvailability($roomId);
                     if (!$availability['available']) {
-                        $errors[] = 'Room is full. Student will be added to the waitlist.';
-                        // Add to waitlist
+                        $waitType = (string) $roomRow['type'];
                         if (!$this->allocationModel->isOnWaitlist($studentId)) {
-                            $this->allocationModel->waitlistAdd($studentId);
-                            AuditLog::log($_SESSION['user_id'], 'CREATE', 'waitlist', $studentId, 'Added to waitlist — room full');
-                            setFlash('warning', 'Room is full. Student has been added to the waitlist.');
+                            $this->allocationModel->waitlistAdd($studentId, $waitType);
+                            AuditLog::log($_SESSION['user_id'], 'CREATE', 'waitlist', $studentId, "Waitlist ({$waitType}) — room full");
+                            setFlash('warning', 'Room is full. Student queued for the next available ' . $waitType . ' room.');
                         } else {
                             setFlash('info', 'Student is already on the waitlist.');
                         }
@@ -158,6 +204,18 @@ class AllocationController
                     $errors[] = 'Student has no active allocation to transfer from.';
                 }
 
+                $targetRoom = $newRoomId ? $this->roomModel->findById($newRoomId) : null;
+                if ($newRoomId && !$targetRoom) {
+                    $errors[] = 'Invalid room selected.';
+                }
+
+                if ($studentId && $targetRoom && empty($errors)) {
+                    $tierErr = $this->allocationTierError($studentId, $targetRoom);
+                    if ($tierErr !== null) {
+                        $errors[] = $tierErr;
+                    }
+                }
+
                 if ($newRoomId && empty($errors)) {
                     $availability = $this->allocationModel->checkAvailability($newRoomId);
                     if (!$availability['available']) {
@@ -220,27 +278,28 @@ class AllocationController
                 $roomId = (int)$currentAlloc['room_id'];
                 $this->roomModel->refreshStatus($roomId);
 
-                // Automation: if space becomes available, allocate the next waitlisted student automatically.
+                // Automation: next waitlisted student for this room tier only.
                 $availability = $this->allocationModel->checkAvailability($roomId);
-                if (!empty($availability['available'])) {
-                    $nextWait = $this->allocationModel->waitlistNext();
-                    if ($nextWait && empty($this->allocationModel->findActiveByStudent((int)$nextWait['student_id']))) {
+                $roomMeta = $this->roomModel->findById($roomId);
+                if (!empty($availability['available']) && $roomMeta) {
+                    $nextWait = $this->allocationModel->waitlistNextForRoomType((string) $roomMeta['type']);
+                    if ($nextWait && empty($this->allocationModel->findActiveByStudent((int) $nextWait['student_id']))) {
                         $allocId = $this->allocationModel->allocate([
-                            'student_id' => (int)$nextWait['student_id'],
-                            'room_id' => $roomId,
-                            'allocated_by' => (int)$_SESSION['user_id'],
-                            'start_date' => date('Y-m-d'),
-                            'notes' => 'Auto-allocated from waitlist after vacating',
+                            'student_id'   => (int) $nextWait['student_id'],
+                            'room_id'      => $roomId,
+                            'allocated_by' => (int) $_SESSION['user_id'],
+                            'start_date'   => date('Y-m-d'),
+                            'notes'        => 'Auto-allocated from waitlist (matching room tier)',
                         ]);
-                        $this->allocationModel->waitlistUpdateStatus((int)$nextWait['student_id'], 'allocated');
+                        $this->allocationModel->waitlistUpdateStatus((int) $nextWait['student_id'], 'allocated');
                         $this->roomModel->refreshStatus($roomId);
 
                         AuditLog::log(
-                            (int)$_SESSION['user_id'],
+                            (int) $_SESSION['user_id'],
                             'CREATE',
                             'allocations',
                             $allocId,
-                            "Auto-allocated waitlisted student #{$nextWait['student_id']} to room #{$roomId}"
+                            "Auto-allocated waitlisted student #{$nextWait['student_id']} to room #{$roomId} ({$roomMeta['type']})"
                         );
                     }
                 }

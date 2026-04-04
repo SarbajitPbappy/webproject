@@ -32,10 +32,11 @@
     <div class="col-lg-3 col-md-6">
         <div class="card card-glass kpi-card kpi-warning">
             <div class="card-body">
-                <div class="kpi-icon"><i class="bi bi-exclamation-circle-fill"></i></div>
+                <div class="kpi-icon"><i class="bi bi-receipt-cutoff"></i></div>
                 <div class="kpi-info">
                     <span class="kpi-value"><?php echo $kpi['outstanding_count']; ?></span>
-                    <span class="kpi-label">Outstanding Payments</span>
+                    <span class="kpi-label">Students with unpaid slips</span>
+                    <small class="d-block text-muted mt-1"><?php echo (int) ($kpi['pending_billing_lines'] ?? 0); ?> open line(s)</small>
                 </div>
             </div>
         </div>

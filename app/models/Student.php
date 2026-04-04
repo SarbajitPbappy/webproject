@@ -88,7 +88,7 @@ class Student
     public function getForDropdown(): array
     {
         $stmt = $this->db->query("
-            SELECT s.id, s.student_id_no, u.full_name 
+            SELECT s.id, s.student_id_no, s.entitled_room_type, u.full_name 
             FROM students s
             JOIN users u ON s.user_id = u.id
             WHERE u.status = 'active'
@@ -103,7 +103,7 @@ class Student
     public function getAllocatedForDropdown(): array
     {
         $stmt = $this->db->query("
-            SELECT s.id, s.student_id_no, u.full_name, a.room_id, r.room_number
+            SELECT s.id, s.student_id_no, s.entitled_room_type, u.full_name, a.room_id, r.room_number, r.type AS current_room_type
             FROM students s
             JOIN users u ON s.user_id = u.id
             JOIN allocations a ON s.id = a.student_id AND a.status = 'active'
@@ -112,6 +112,37 @@ class Student
             ORDER BY u.full_name ASC
         ");
         return $stmt->fetchAll();
+    }
+
+    /**
+     * Active students currently living in the hall (active allocation).
+     *
+     * @return int[]
+     */
+    public function activeResidentIds(): array
+    {
+        $stmt = $this->db->query("
+            SELECT DISTINCT s.id FROM students s
+            JOIN users u ON s.user_id = u.id
+            JOIN allocations a ON a.student_id = s.id AND a.status = 'active'
+            WHERE u.status = 'active'
+        ");
+        return array_map('intval', array_column($stmt->fetchAll(), 'id'));
+    }
+
+    /**
+     * All students with active user accounts.
+     *
+     * @return int[]
+     */
+    public function allActiveStudentIds(): array
+    {
+        $stmt = $this->db->query("
+            SELECT s.id FROM students s
+            JOIN users u ON s.user_id = u.id
+            WHERE u.status = 'active'
+        ");
+        return array_map('intval', array_column($stmt->fetchAll(), 'id'));
     }
 
     /**

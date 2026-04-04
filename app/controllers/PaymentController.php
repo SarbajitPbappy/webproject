@@ -6,11 +6,13 @@
 require_once APP_ROOT . '/app/models/Payment.php';
 require_once APP_ROOT . '/app/models/AuditLog.php';
 require_once APP_ROOT . '/app/models/Student.php';
+require_once APP_ROOT . '/app/models/BillingCharge.php';
 
 class PaymentController
 {
     private Payment $paymentModel;
     private Student $studentModel;
+    private BillingCharge $billingModel;
 
     public function __construct()
     {
@@ -23,6 +25,7 @@ class PaymentController
         }
         $this->paymentModel = new Payment();
         $this->studentModel = new Student();
+        $this->billingModel = new BillingCharge();
     }
 
     /**
@@ -84,6 +87,15 @@ class PaymentController
         }
 
         $payments = $this->paymentModel->all($filters);
+
+        $billingPending = [];
+        if (in_array($role, ['student', 'staff'], true)) {
+            $stuRow = $this->studentModel->findByUserId($userId);
+            if ($stuRow) {
+                $billingPending = $this->billingModel->pendingForStudent((int) $stuRow['id']);
+            }
+        }
+
         ob_start();
         require_once APP_ROOT . '/views/payments/index.php';
         $viewContent = ob_get_clean();
@@ -108,20 +120,20 @@ class PaymentController
             exit;
         }
 
-        $studentId = (int)$student['id'];
-        $dueAmount = $this->paymentModel->calculateStudentDue($studentId);
-        
-        if ($dueAmount <= 0) {
-            setFlash('info', 'You have no pending dues to pay.');
+        $studentId = (int) $student['id'];
+        $pendingCharges = $this->billingModel->pendingForStudent($studentId);
+
+        if (empty($pendingCharges)) {
+            setFlash(
+                'info',
+                'You have no outstanding bills. The warden issues slips for rent, meals, utilities, and other fees—check back after new slips are posted.'
+            );
             header('Location: ' . BASE_URL . '?url=payments/index');
             exit;
         }
 
         $pageTitle = 'Make Payment';
-        
-        // Fetch active fee structures for the dropdown
-        $feeStructures = $this->paymentModel->getFeeStructures();
-        
+
         ob_start();
         require_once APP_ROOT . '/views/payments/portal.php';
         $viewContent = ob_get_clean();
@@ -156,12 +168,27 @@ class PaymentController
                 exit;
             }
 
-            $feeId = sanitizeInt($_POST['fee_id'] ?? 0);
-            if ($feeId <= 0) {
-                setFlash('error', 'Please select a fee type.');
+            $billingChargeId = sanitizeInt($_POST['billing_charge_id'] ?? 0);
+            if ($billingChargeId <= 0) {
+                setFlash('error', 'Please select a bill to pay.');
                 header('Location: ' . BASE_URL . '?url=payments/makePayment');
                 exit;
             }
+
+            $charge = $this->billingModel->findById($billingChargeId);
+            if (
+                !$charge
+                || $charge['status'] !== 'pending'
+                || (int) $charge['student_id'] !== (int) $student['id']
+            ) {
+                setFlash('error', 'That bill is not available for payment.');
+                header('Location: ' . BASE_URL . '?url=payments/makePayment');
+                exit;
+            }
+
+            $feeId = (int) $charge['fee_id'];
+            $amount = (float) $charge['amount_due'];
+            $periodMonth = (string) $charge['period_month'];
 
             $cardNumber = trim((string)($_POST['card_number'] ?? ''));
             $expiry = trim((string)($_POST['expiry'] ?? ''));
@@ -174,35 +201,22 @@ class PaymentController
                 exit;
             }
 
-            // Do not trust the posted amount; use the fee_structures table value.
-            $db = Database::getInstance();
-            $fee = $db->query(
-                "SELECT id, amount FROM fee_structures WHERE id = :fid AND is_active = TRUE LIMIT 1",
-                [':fid' => $feeId]
-            )->fetch();
-
-            if (!$fee) {
-                setFlash('error', 'Selected fee type is not available.');
-                header('Location: ' . BASE_URL . '?url=payments/makePayment');
-                exit;
-            }
-
-            $amount = (float)$fee['amount'];
             if ($amount <= 0) {
-                setFlash('error', 'Invalid fee amount.');
+                setFlash('error', 'Invalid bill amount.');
                 header('Location: ' . BASE_URL . '?url=payments/makePayment');
                 exit;
             }
 
             $paymentId = $this->paymentModel->record([
-                'student_id' => (int)$student['id'],
-                'fee_id' => (int)$feeId,
-                'amount_paid' => $amount,
-                'payment_date' => date('Y-m-d'),
-                'payment_method' => 'online',
-                'recorded_by' => $userId,
-                'month_year' => date('Y-m'),
-                'notes' => 'Online portal payment',
+                'student_id'        => (int) $student['id'],
+                'fee_id'            => $feeId,
+                'amount_paid'       => $amount,
+                'payment_date'      => date('Y-m-d'),
+                'payment_method'    => 'online',
+                'recorded_by'       => $userId,
+                'month_year'        => $periodMonth,
+                'notes'             => 'Online portal — billing slip #' . $billingChargeId,
+                'billing_charge_id' => $billingChargeId,
             ]);
 
             AuditLog::log($userId, 'PAYMENT', 'payments', $paymentId, "Made online payment of ৳{$amount}");
