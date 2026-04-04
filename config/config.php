@@ -102,7 +102,8 @@ function hostelease_parse_mysql_connection_url(string $raw): ?array
 // ─── Application Settings ───────────────────────────────────────────
 define('APP_NAME', 'HostelEase');
 define('APP_VERSION', '1.0.0');
-// BASE_URL is used for generating links. In production (Render), the host is dynamic,
+
+// BASE_URL is used for generating links. In production (Railway), the host is dynamic,
 // so we compute it from environment/request when not explicitly provided.
 $baseUrlEnv = getenv('BASE_URL') ?: '';
 // Safety: don't allow localhost BASE_URL in production.
@@ -129,66 +130,65 @@ if (!empty($baseUrlEnv) && !(APP_ENV !== 'development' && $isLocalhostBase)) {
 define('BASE_URL', $computedBaseUrl);
 
 // ─── Database Configuration ─────────────────────────────────────────
-// CLI on your laptop: internal Railway hostnames do not resolve. Use either:
-// - DB_PUBLIC_HOST=junction.proxy.rlwy.net (+ DB_PUBLIC_PORT), or
-// - Paste the full mysql://… URL from Railway → MySQL → Connect into DB_PUBLIC_HOST, or
-// - Rely on DATABASE_URL / MYSQL_URL when `railway run` injects them.
-// Web (Apache) is not CLI, so it keeps using DB_HOST / DB_PORT / DB_* from env.
+// Modern Railway MySQL (2025+) injects MYSQLHOST / MYSQL_URL etc.
+// This section now works correctly in BOTH web (Apache) and CLI.
 $isCli = PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg';
 
+// Default fallback values (used only if no Railway variables are present)
 $dbHost = getenv('DB_HOST') ?: 'mysql.railway.internal';
 $dbPort = getenv('DB_PORT') ?: '3306';
 $dbName = getenv('DB_NAME') ?: 'railway';
 $dbUser = getenv('DB_USER') ?: 'root';
 $dbPass = getenv('DB_PASS') ?: 'kHjGUyMcoSqarkkIHTPjYsqyMZkSlRqs';
 
-if ($isCli) {
-    $parsed = null;
-    $urlCandidates = [
-        getenv('DB_PUBLIC_HOST'),
-        getenv('MYSQL_PUBLIC_URL'),
-        getenv('DATABASE_PUBLIC_URL'),
-        getenv('DATABASE_URL'),
-        getenv('MYSQL_URL'),
-    ];
-    foreach ($urlCandidates as $candidate) {
-        if ($candidate === false || $candidate === '') {
-            continue;
-        }
-        $p = hostelease_parse_mysql_connection_url($candidate);
-        if ($p === null) {
-            continue;
-        }
-        // `railway run` may inject internal URLs; those do not resolve on your laptop.
-        if (str_ends_with($p['host'], '.railway.internal')) {
-            continue;
-        }
-        $parsed = $p;
-        break;
-    }
+// Try Railway's official connection variables (works on web AND CLI)
+$parsed = null;
+$urlCandidates = [
+    getenv('MYSQL_URL'),           // Primary official variable
+    getenv('DATABASE_URL'),
+    getenv('MYSQL_PUBLIC_URL'),
+    getenv('DATABASE_PUBLIC_URL'),
+    getenv('DB_PUBLIC_HOST'),      // legacy fallback
+];
 
-    if ($parsed !== null) {
-        $dbHost = $parsed['host'];
-        if ($parsed['port'] !== null) {
-            $dbPort = $parsed['port'];
-        }
-        if ($parsed['database'] !== null) {
-            $dbName = $parsed['database'];
-        }
-        if ($parsed['user'] !== null) {
-            $dbUser = $parsed['user'];
-        }
-        if ($parsed['pass'] !== null) {
-            $dbPass = $parsed['pass'];
-        }
-    } else {
-        $publicHost = getenv('DB_PUBLIC_HOST');
-        if ($publicHost !== false && $publicHost !== '') {
-            $dbHost = $publicHost;
-            $publicPort = getenv('DB_PUBLIC_PORT');
-            if ($publicPort !== false && $publicPort !== '') {
-                $dbPort = $publicPort;
-            }
+foreach ($urlCandidates as $candidate) {
+    if ($candidate === false || $candidate === '') {
+        continue;
+    }
+    $p = hostelease_parse_mysql_connection_url($candidate);
+    if ($p === null) {
+        continue;
+    }
+    // On local CLI: skip internal Railway hostnames (they don't resolve locally)
+    if ($isCli && str_ends_with($p['host'], '.railway.internal')) {
+        continue;
+    }
+    $parsed = $p;
+    break;
+}
+
+if ($parsed !== null) {
+    $dbHost = $parsed['host'];
+    if ($parsed['port'] !== null) {
+        $dbPort = $parsed['port'];
+    }
+    if ($parsed['database'] !== null) {
+        $dbName = $parsed['database'];
+    }
+    if ($parsed['user'] !== null) {
+        $dbUser = $parsed['user'];
+    }
+    if ($parsed['pass'] !== null) {
+        $dbPass = $parsed['pass'];
+    }
+} elseif ($isCli) {
+    // CLI-only public TCP proxy fallback (when using DB_PUBLIC_HOST from Railway dashboard)
+    $publicHost = getenv('DB_PUBLIC_HOST');
+    if ($publicHost !== false && $publicHost !== '') {
+        $dbHost = $publicHost;
+        $publicPort = getenv('DB_PUBLIC_PORT');
+        if ($publicPort !== false && $publicPort !== '') {
+            $dbPort = $publicPort;
         }
     }
 }
@@ -199,7 +199,8 @@ define('DB_NAME', $dbName);
 define('DB_USER', $dbUser);
 define('DB_PASS', $dbPass);
 define('DB_CHARSET', 'utf8mb4');
-// Default to false for local dev; set true in Render if your DB requires SSL.
+
+// Railway internal connections do NOT need the old SSL flag
 define('DB_SSL', filter_var(getenv('DB_SSL') ?: 'false', FILTER_VALIDATE_BOOLEAN));
 
 // ─── File Upload Settings ───────────────────────────────────────────
