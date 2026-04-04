@@ -140,7 +140,7 @@ $dbHost = getenv('DB_HOST') ?: 'mysql.railway.internal';
 $dbPort = getenv('DB_PORT') ?: '3306';
 $dbName = getenv('DB_NAME') ?: 'railway';
 $dbUser = getenv('DB_USER') ?: 'root';
-$dbPass = getenv('DB_PASS') ?: '';
+$dbPass = getenv('DB_PASS') ?: 'kHjGUyMcoSqarkkIHTPjYsqyMZkSlRqs';
 
 if ($isCli) {
     $parsed = null;
